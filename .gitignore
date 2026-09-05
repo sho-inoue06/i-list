@@ -1,0 +1,17 @@
+node_modules/
+dist/
+data/
+.DS_Store
+*.log
+.env
+.env.*
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite*
+*.xlsx
+*.xls
+*.csv
+*.pdf
+.claude/settings.local.json
