@@ -38,6 +38,13 @@ const SEED = {
   },
 };
 
+// サーバ応答が期待するデータ形 { runs:[], regs:[], cert:{} } かを判定する。
+// 配列も typeof は "object" になるため、cert は「nullでない・配列でないオブジェクト」であることまで確認する。
+// （cert:[] を通してしまうと、SEEDを保持したまま読込成功と誤認して保存に進む）
+export const isValidData = (d) =>
+  !!d && Array.isArray(d.runs) && Array.isArray(d.regs) &&
+  typeof d.cert === "object" && d.cert !== null && !Array.isArray(d.cert);
+
 let _id = 100;
 const nextKey = () => "r" + (++_id);
 // サーバから読んだランのキー(r101など)と新規追加のキーがぶつからないよう底上げする
@@ -49,31 +56,60 @@ const bumpIdFrom = (runs) => {
 };
 
 export default function IListApp() {
-  const [runs, setRuns] = useState(SEED.runs);
-  const [regs, setRegs] = useState(SEED.regs);
-  const [cert, setCert] = useState(SEED.cert);
+  const [runs, _setRuns] = useState(SEED.runs);
+  const [regs, _setRegs] = useState(SEED.regs);
+  const [cert, _setCert] = useState(SEED.cert);
   const [tab, setTab] = useState("帳票");
-  const fileRef = useRef(null);
-  const [loaded, setLoaded] = useState(false);
-  const [save, setSave] = useState("idle"); // idle=読み込み中 saving saved error
 
-  // 起動時：サーバから読み込む。サーバが空（初回）なら SEED のまま → 直後の自動保存でDBに入る
+  // 編集世代：データ変更を「受け付けた時点」で進める。
+  // 送信済みPUTの応答は、返ってきた時点の世代が自分の世代と一致するときだけ保存表示に反映する。
+  // useEffect の中で進めるだけでは、変更受付からEffect実行までの間に届いた古い応答が
+  // 「最新の応答」と誤認される窓が残るため、受付時点で進めるのが要点。
+  const saveGen = useRef(0);
+  // データ変更を受け付けたことを記録する（render中やstate updater内では呼ばない）
+  const bumpGen = () => { saveGen.current += 1; };
+  // runs/regs/cert の変更経路（手入力・JSON読込・初回読込の反映）はすべてこの3つを通す。
+  // updater関数もそのまま渡せるように、副作用はupdaterの外（呼び出し時）で済ませている。
+  const setRuns = (v) => { bumpGen(); _setRuns(v); };
+  const setRegs = (v) => { bumpGen(); _setRegs(v); };
+  const setCert = (v) => { bumpGen(); _setCert(v); };
+  const fileRef = useRef(null);
+  // loaded: 初回読込が「成功」した後にのみ true にする（保存を許可するフラグ）
+  // 通信失敗・HTTPエラー・不正な応答（runs/regs/certが揃っていない）は失敗として扱い、loadedをtrueにしない
+  const [loaded, setLoaded] = useState(false);
+  // loading=読込中 / loadError=初回読込失敗（保存停止中） / saving=保存中 / saved=保存済み / saveError=保存失敗
+  // 初回読込失敗(loadError)と保存失敗(saveError)は原因も対処も違うので別状態にする
+  const [save, setSave] = useState("loading");
+
+  // 起動時：サーバから読み込む。サーバが空（初回）なら SEED のまま → 読込成功として扱い、直後の自動保存でDBに入る
   useEffect(() => {
+    let cancelled = false;
     fetch("/api/data")
       .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
       .then((d) => {
+        if (cancelled) return;
+        if (!isValidData(d)) throw new Error("不正な応答形式です");
         if (d.runs.length || d.regs.length || Object.keys(d.cert).length) {
           setRuns(d.runs); setRegs(d.regs); setCert(d.cert);
           bumpIdFrom(d.runs);
         }
         setLoaded(true);
+        setSave("saved");
       })
-      .catch(() => { setSave("error"); setLoaded(true); });
+      .catch(() => { if (!cancelled) setSave("loadError"); }); // loadedはfalseのまま→保存は行われない
+    return () => { cancelled = true; };
   }, []);
 
-  // 編集のたびに自動保存（0.8秒待ってまとめて送る）
+  // 編集のたびに自動保存（0.8秒待ってまとめて送る）。初回読込が成功するまでは送らない
   useEffect(() => {
     if (!loaded) return;
+    // 世代はデータ変更の受付時（setRuns/setRegs/setCert）に進めてある。ここでは読むだけ。
+    const gen = saveGen.current;
+    // このEffectが送ったPUTの応答を無効化するためのフラグ。
+    // アンマウント時や次の変更時のcleanupで倒し、応答が状態更新の経路へ進まないようにする。
+    let dropped = false;
+    // 世代が最新で、かつこのEffectが破棄されていないときだけ保存表示を更新する
+    const applySave = (next) => { if (!dropped && gen === saveGen.current) setSave(next); };
     setSave("saving");
     const t = setTimeout(() => {
       fetch("/api/data", {
@@ -81,10 +117,13 @@ export default function IListApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ runs, regs, cert }),
       })
-        .then((r) => { if (!r.ok) throw new Error(); setSave("saved"); })
-        .catch(() => setSave("error"));
+        .then((r) => {
+          if (!r.ok) throw new Error();
+          applySave("saved");
+        })
+        .catch(() => { applySave("saveError"); });
     }, 800);
-    return () => clearTimeout(t);
+    return () => { clearTimeout(t); dropped = true; };
   }, [runs, regs, cert, loaded]);
 
   const typeIds = useMemo(() => [...new Set(runs.map(r => r.typeId))], [runs]);
@@ -373,10 +412,13 @@ function CertEditor({ typeIds, regs, cert, setCert, colorOf }) {
 // ===== 保存ステータス表示 =====
 function SaveStatus({ save }) {
   const m = {
-    idle:   { c: MUTE,  t: "読み込み中…" },
-    saving: { c: AMBER, t: "保存中…" },
-    saved:  { c: GREEN, t: "サーバに保存済み" },
-    error:  { c: RED,   t: "サーバ未接続（保存されません）" },
+    loading:  { c: MUTE,  t: "読み込み中…" },
+    saving:   { c: AMBER, t: "保存中…" },
+    saved:    { c: GREEN, t: "サーバに保存済み" },
+    // 初回読込に失敗＝保存自体を止めている（サーバ側データは保護される）
+    loadError:{ c: RED,   t: "初回読込に失敗（保存は行われません）" },
+    // 読込は成功したがPUTが失敗＝画面の変更がサーバに入っていない
+    saveError:{ c: RED,   t: "保存に失敗（変更は未保存です）" },
   }[save];
   return (
     <span style={{ display:"inline-flex", alignItems:"center", gap:5, fontSize:11, color:m.c }}>
