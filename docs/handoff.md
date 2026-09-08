@@ -103,3 +103,18 @@ SHA-256：
 - サーバ側の書込順序の競合、ケースM（アンマウント後の`setSave`抑止＝SKIP）は引き続き別課題。
 - 5指摘それぞれの対照実験（個別無効化）、互換性変更（非正規ridの拒否／接頭辞なしkeyの受理）の
   採否判断は、過去の残件として継続。
+
+---
+
+## 追記：2026-09-08 Git運用ルールの変更（本ドキュメント本文とは別件）
+
+ユーザー承認により、Git運用ルールを変更した（対象：[AGENTS.md](../AGENTS.md)、CLAUDE.md、
+本ファイル、[docs/current-task.md](current-task.md)）。CLAUDE.mdは`@AGENTS.md`のみのため変更不要。
+
+- 旧ルール：「Gitはユーザー担当。AIはclone・commit・push・resetなどGitコマンドを実行しない。」
+- 新ルール：状態を変更しない確認（status／diff／log／remote -v／rev-parse等）は実行可。
+  書込（stage→commit→push）はユーザーへの事前提示＋明示承認後、承認範囲のファイルのみ実行可。
+  強制push・履歴書換え・変更破棄・ブランチ削除・remote/Git設定変更・保護ブランチ直接push・
+  merge/pull/競合解消は別承認。詳細条件は[AGENTS.md](../AGENTS.md)を正本とする。
+- 本ファイル4行目・過去の本文中の「Gitコマンドは読取・書込とも未実行」等の記述は、
+  その時点（旧ルール下）の実行記録であり、書き換えていない。

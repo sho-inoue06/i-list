@@ -18,7 +18,8 @@
 - コミット: `c0efb949bcf1511ded128b085ac57b2fd153dcdd`
 
 ## 対象外（今夜はやらない）
-- Gitコマンドの実行（読取・書込とも）。clone・状態確認・差分確認・commit・pushはユーザーが行う。
+- ~~Gitコマンドの実行（読取・書込とも）。clone・状態確認・差分確認・commit・pushはユーザーが行う。~~
+  ＊2026-09-08 ユーザー承認によりGit運用ルールを変更（旧ルール）。現行ルールは[AGENTS.md](../AGENTS.md)を参照。
 - 会社資料・実車情報・実日程・実認可番号・秘密情報の取り扱い。
 - 旧data、SQLiteファイル、Excelファイル、profile.md、notion_node.html、.claude、.git、node_modules、dist、個人設定の移植。
 - ⑤-0の実装、Excel取り込みの実装、プロジェクトグループの実装、認可継承の実装。
