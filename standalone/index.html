@@ -2,6 +2,38 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      このページ自身の通信経路を、ブラウザ側で明示的に制限する（Content Security Policy）。
+      単体版は「実行時にNode・Vite・API・CDN・ネット接続を必要としない」ことが前提なので、
+      その前提をコメントではなくブラウザが強制する設定として書き下す。
+      ビルド時にこのHTMLがそのまま雛形（#ilist-template）へ入るため、
+      「データ入りHTMLを保存」で作ったファイルにもこの制限がそのまま残る。
+
+      ここに書いたものだけが必要な指定。現物のビルド出力で確認して最小化している。
+        default-src 'none'   … 既定は全面禁止。JS・CSSはすべてHTMLへ埋め込み済みで、
+                               img・font・media・object・frame・worker・manifest・connect の
+                               外部取得は1件も無い（これらは default-src へ落ちるので個別指定しない）。
+                               fetch/XHR も禁止＝アプリ自身からの外部送信経路を塞ぐ。
+        script-src 'unsafe-inline'
+                             … アプリ本体は単一のインライン script（type=module）1個。
+                               外部srcが無いのでホスト指定は不要。eval・new Function は
+                               バンドルに含まれないため 'unsafe-eval' は付けない。
+        style-src 'unsafe-inline'
+                             … head のインライン style要素 と、Reactの style={{…}} 属性のため。
+                               外部スタイルシート・@font-face・url() は無い。
+        base-uri 'none'      … default-src では制御されない。base要素 の差し込みによる
+                               相対URLの書き換えを禁止する（このページに base要素 は無い）。
+        form-action 'none'   … 同じく default-src では制御されない。フォーム送信による
+                               外部への持ち出しを禁止する（このページに form要素 は無い）。
+
+      注意：frame-ancestors・sandbox・report-uri は <meta> では無視される（コンソール警告が出る）ため書かない。
+      「データ入りHTMLを保存」「JSONに書き出し」の Blob ダウンロードは取得(fetch)指令の対象外なので、
+      そのために許可を足す必要はない（ヘッドレスChromeで実測して確認）。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Iリスト 単体デモ（ダミー専用・サーバなし）</title>
     <style>
