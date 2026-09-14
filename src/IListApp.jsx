@@ -127,6 +127,197 @@ export const summarize = (runs, regs, cert) => {
   return { leaks, effDrop };
 };
 
+// ───────────────────────────────────────────────
+// 人の適用判断・理由メモ（decisions）
+//
+// 自動の日程判定（evalCellWith）・黄色の接近予告（approachingNoticeFor）・
+// 認証実績（cert[typeId][reg.id]）とは完全に別のデータとして持つ。
+// 判断の状態を予定・実績へ流用せず、判断が自動判定を上書きすることもない。
+//
+// 判断の単位＝「型式ラン × 法規行」。結合キーは run.key と reg.rid の2つ。
+//   ・run.key … 外部JSON経由では「空でない一意な文字列」であればよく、"r"+数字とは限らない。
+//   ・reg.rid … アプリが生成する内部キーで、必ず "g"+数字（parseImportedDataが強制する）。
+// この2つを1本の文字列へ連結すると、run.key 側に区切り文字が入りうる。
+// そのため decisions は「runKey と rid を別フィールドに持つ配列」とし、連結キーを作らない。
+// 組 (runKey, rid) の重複は読込時に拒否する。
+//
+// 判断レコード：
+//   { runKey, rid, state, reason, decidedAt, needsRecheck, cond }
+//     state        … "未確認" / "対象" / "対象外"（レコードが無い＝未確認・理由空・日時空）
+//     reason       … 自由記述。state="対象外" は空白のみ不可
+//     decidedAt    … 対象／対象外を明示確定した端末時刻。未確認は ""
+//     needsRecheck … 要再確認フラグ。判断3択とは別。いちど立つと人の明示再確定でしか下りない
+//     cond         … 確定時の条件スナップショット（未確認は null）
+// ───────────────────────────────────────────────
+export const DECISION_STATES = ["未確認", "対象", "対象外"];
+export const PARENT_LINKS = ["none", "one", "unresolved", "ambiguous"];
+const RID_FORMAT = /^g\d+$/;
+
+// 法規行の「親（シリーズアップ元）」の解決状態。
+//
+// reg.parent は親法規の *reg.id 文字列* を持つ（rid ではない）。
+// reg.id は利用者が入力する値で空・重複がありうるため、親は一意に決まるとは限らない。
+// 先頭一致や「最初に見つかった行」で親を決めない（任意の親を選んで確定扱いにしない）。
+//
+//   none       … 親指定なし（parent が空）
+//   one        … parent と id が完全一致する行がちょうど1件＝一意に解決
+//   unresolved … 親指定はあるが一致する行が無い（親の改名・削除で切れた）
+//   ambiguous  … 一致する行が複数ある（どれが親か決められない）
+// unresolved / ambiguous は「解決できていない」ことを表し、rid は空のままにする。
+export function parentLinkOf(reg, regs) {
+  const parent = typeof reg?.parent === "string" ? reg.parent : "";
+  if (parent === "") return { link: "none", rid: "" };
+  const list = Array.isArray(regs) ? regs : [];
+  const hits = list.filter((x) => x && x.rid !== reg.rid && x.id === parent);
+  if (hits.length === 1) return { link: "one", rid: hits[0].rid };
+  if (hits.length === 0) return { link: "unresolved", rid: "" };
+  return { link: "ambiguous", rid: "" };
+}
+
+// 判断を確定した時点の条件。ここに含めた項目が変わると要再確認になる。
+//
+// 含める（同一性・適用可否に効く）：
+//   run … typeId / sk（新継） / lo / drop
+//   reg … id（法規ID。cert の参照キーでもある） / shin / kei / parent / 親の解決状態
+// 含めない（表示名だけの変更）：
+//   run.gen（プロジェクト/世代）、reg.label（名称）
+// ※ 名称を変えて別プロジェクト・別法規へ行を流用する運用は想定しない（新規行を使う）。
+export const COND_FIELDS = ["typeId", "sk", "lo", "drop", "regId", "shin", "kei", "parent", "parentLink", "parentRid"];
+export function condOf(run, reg, regs) {
+  const p = parentLinkOf(reg, regs);
+  return {
+    typeId: run?.typeId ?? "", sk: run?.sk ?? "", lo: run?.lo ?? "", drop: run?.drop ?? "",
+    regId: reg?.id ?? "", shin: reg?.shin ?? "", kei: reg?.kei ?? "", parent: reg?.parent ?? "",
+    parentLink: p.link, parentRid: p.rid,
+  };
+}
+export function condEquals(a, b) {
+  if (!a || !b) return false;
+  return COND_FIELDS.every((f) => a[f] === b[f]);
+}
+
+// (runKey, rid) で判断を引くための索引。
+// 連結キーを作らず入れ子のMapにするので、runKeyにどんな文字が入っていても衝突しない。
+export function decisionIndex(decisions) {
+  const m = new Map();
+  for (const d of decisions || []) {
+    if (!m.has(d.runKey)) m.set(d.runKey, new Map());
+    m.get(d.runKey).set(d.rid, d);
+  }
+  return m;
+}
+export function findDecision(index, runKey, rid) {
+  return index.get(runKey)?.get(rid) || null;
+}
+
+// この判断が「いま要再確認であるべき理由」。空配列＝理由なし。
+// 未確認の判断は確定していないので対象外（要再確認という概念を持たない）。
+export function recheckReasons(dec, run, reg, regs) {
+  if (!dec || dec.state === "未確認") return [];
+  if (!run || !reg) return [];
+  const cur = condOf(run, reg, regs);
+  const out = [];
+  if (!dec.cond) out.push("確定した時の条件が記録されていません");
+  else if (!condEquals(dec.cond, cur)) out.push("確定した時から条件が変わりました");
+  // 親リンクが解決できていない状態は、条件が変わっていなくても可視化する
+  // （どの法規を親として確定したのかを確かめられないため）。
+  if (cur.parentLink === "unresolved") out.push("シリーズアップ元の法規が見つかりません");
+  if (cur.parentLink === "ambiguous") out.push("シリーズアップ元の候補が複数あります");
+  return out;
+}
+
+// 要再確認フラグの掃き出し。
+//   ・立てるだけで、下ろすことは絶対にしない（＝条件が元に戻っても自動で解除されない）。
+//   ・解除は人の明示再確定（saveDecision で対象／対象外を確定し直す）だけ。
+// 変化が無ければ *同じ配列参照* を返す（呼び出し側が無限ループにならないように）。
+export function sweepRecheck(decisions, runs, regs) {
+  const list = decisions || [];
+  const runByKey = new Map((runs || []).map((r) => [r.key, r]));
+  const regByRid = new Map((regs || []).map((r) => [r.rid, r]));
+  let changed = false;
+  const next = list.map((d) => {
+    if (d.state === "未確認" || d.needsRecheck) return d;
+    const reasons = recheckReasons(d, runByKey.get(d.runKey), regByRid.get(d.rid), regs);
+    if (reasons.length === 0) return d;
+    changed = true;
+    return { ...d, needsRecheck: true };
+  });
+  return changed ? next : list;
+}
+
+// 判断1件の登録・更新（同じ (runKey, rid) があれば置き換え、無ければ追加）。
+export function upsertDecision(decisions, next) {
+  const list = decisions || [];
+  const i = list.findIndex((d) => d.runKey === next.runKey && d.rid === next.rid);
+  if (i === -1) return [...list, next];
+  const out = list.slice();
+  out[i] = next;
+  return out;
+}
+
+// 情報を持たない判断（未確認・理由空・要再確認なし・条件なし）を落とす。
+// レコードが無い状態と意味が同じなので、書き出しに含めない。
+export function normalizeDecisions(decisions) {
+  return (decisions || []).filter(
+    (d) => !(d.state === "未確認" && d.reason.trim() === "" && !d.needsRecheck && !d.cond)
+  );
+}
+
+// 判断の確定日時（decidedAt）の受理規則。
+//
+// このアプリが生成するのは nowStamp() の "YYYY-MM-DD HH:MM" だけである（分精度・端末のローカル時刻、
+// タイムゾーン表記なし）。したがって受理もこの形式ちょうどに限る。
+// 前後の空白・秒付き・T区切り・桁の省略（2026-9-9 1:2）は受理しない。
+// 「読めればよい」ではなく「このアプリが書いた値か」を確かめるための規則である。
+//
+// 実在性も見る。Date.parse の成否や Date の自動繰上がり（2026-02-30 → 03-02）に頼ると
+// 存在しない日時を通してしまうため、月ごとの日数と閏年を自分で判定する。
+//
+// これは判断の確定日時だけの規則で、LO・ドロップ・新型／継続規制日など既存の日付欄の
+// 受理仕様は変更しない（従来どおり文字列として受ける）。
+const DECIDED_AT_FORMAT = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/;
+const isLeapYear = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+const daysInMonth = (y, m) => [31, isLeapYear(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1];
+export function isValidDecidedAt(value) {
+  if (typeof value !== "string") return false;
+  const m = DECIDED_AT_FORMAT.exec(value);
+  if (!m) return false;
+  const year = Number(m[1]), month = Number(m[2]), day = Number(m[3]);
+  const hour = Number(m[4]), minute = Number(m[5]);
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > daysInMonth(year, month)) return false;
+  if (hour > 23 || minute > 59) return false;
+  return true;
+}
+
+// 判断が空でない理由を持つか（対象外の理由必須チェックに使う）
+export const hasReason = (s) => typeof s === "string" && s.trim() !== "";
+
+// 判断を確定した端末時刻。本人認証や監査証跡としては保証しない（端末の時計に依存する）。
+export function nowStamp(d = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// 型式ラン／法規行を削除したときに、その行を参照する判断だけを取り除く。
+// 参照整合性を保つためで、他の判断には触れない
+// （通常編集で孤立参照を作ると、自分で書き出したJSONを読み戻せなくなる）。
+export const pruneDecisionsByRun = (decisions, runKey) => (decisions || []).filter((d) => d.runKey !== runKey);
+export const pruneDecisionsByReg = (decisions, rid) => (decisions || []).filter((d) => d.rid !== rid);
+
+// 指定した型式ランの「確定した判断」だけを手動で要再確認にする。
+// アプリに入力していない装備変更などは自動検知できないため、人が明示的に立てるための操作。
+// 未確認の判断・他のランの判断には触れない。理由・確定日時・確定時条件は保持する。
+export function markRunNeedsRecheck(decisions, runKey) {
+  let changed = false;
+  const next = (decisions || []).map((d) => {
+    if (d.runKey !== runKey || d.state === "未確認" || d.needsRecheck) return d;
+    changed = true;
+    return { ...d, needsRecheck: true };
+  });
+  return changed ? next : decisions || [];
+}
+
 // 採番の上限。生成できる範囲と読み込める範囲を同じ値にそろえる。
 // ここがずれると「自分が書き出したJSONを読み戻せない」ことが起きる。
 // 上限そのものは読み込めるが、それを超える追加はできない（＝追加時に上限エラー）。
@@ -328,6 +519,74 @@ export function parseImportedData(d) {
     }
   }
 
+  // decisions（人の適用判断）。
+  //
+  //   キーそのものが無い（旧形式）… 受理し「判断データなし」＝全件未確認として扱う。
+  //     既存の runs/regs/cert・ID は作り直さない（rid の補完も従来どおり行う）。
+  //   キーがあるのに壊れている  … ファイル全体を拒否する（現在のデータを部分置換しない）。
+  //
+  // 判断付きのデータでは regs 全行に rid が必要。rid が欠けているものを補番して埋めると、
+  // 補われた rid と判断の参照が食い違い、既存の判断が別の法規行へ結び付く（誤結合）。
+  // 補番でつなぎ直すことはせず、非破壊で拒否する。
+  let decisions = [];
+  if (d.decisions !== undefined) {
+    if (!Array.isArray(d.decisions)) return err("decisions が配列ではありません。");
+    for (let i = 0; i < d.regs.length; i++) {
+      if (d.regs[i].rid === undefined) {
+        return err(`decisions を含むデータでは regs[${i}].rid が必要です（内部キーを補番して判断をつなぎ直すことはしません）。`);
+      }
+    }
+    // (runKey, rid) の重複は、runKeyごとのSetを入れ子にして見る（連結キーを作らない）
+    const seenByRun = new Map();
+    for (let i = 0; i < d.decisions.length; i++) {
+      const rec = d.decisions[i];
+      if (!rec || typeof rec !== "object" || Array.isArray(rec)) return err(`decisions[${i}] が判断オブジェクトではありません。`);
+      if (!isStr(rec.runKey) || rec.runKey === "") return err(`decisions[${i}].runKey が文字列ではありません。`);
+      if (!isStr(rec.rid) || rec.rid === "") return err(`decisions[${i}].rid が文字列ではありません。`);
+      // 参照整合性：存在しない行を指す判断（孤立参照）は勝手に修復せず拒否する
+      if (!runKeys.has(rec.runKey)) return err(`decisions[${i}] が存在しない型式ラン "${rec.runKey}" を参照しています。`);
+      if (!regRids.has(rec.rid)) return err(`decisions[${i}] が存在しない法規行 "${rec.rid}" を参照しています。`);
+      if (!seenByRun.has(rec.runKey)) seenByRun.set(rec.runKey, new Set());
+      const ridsOfRun = seenByRun.get(rec.runKey);
+      if (ridsOfRun.has(rec.rid)) return err(`decisions に同じ型式ラン×法規行の判断が重複しています（${rec.runKey} × ${rec.rid}）。`);
+      ridsOfRun.add(rec.rid);
+
+      if (!DECISION_STATES.includes(rec.state)) return err(`decisions[${i}].state が「未確認 / 対象 / 対象外」のいずれかではありません。`);
+      if (!isStr(rec.reason)) return err(`decisions[${i}].reason が文字列ではありません。`);
+      if (!isStr(rec.decidedAt)) return err(`decisions[${i}].decidedAt が文字列ではありません。`);
+      if (typeof rec.needsRecheck !== "boolean") return err(`decisions[${i}].needsRecheck が真偽値ではありません。`);
+      // 対象外は「空白だけでない理由」が必須。理由の無い対象外を受理しない
+      if (rec.state === "対象外" && !hasReason(rec.reason)) {
+        return err(`decisions[${i}] は「対象外」ですが理由がありません。`);
+      }
+      // 未確認は確定していないので、確定日時・確定時条件を持たない
+      if (rec.state === "未確認" && (rec.decidedAt !== "" || rec.cond !== null)) {
+        return err(`decisions[${i}] は「未確認」ですが確定日時または確定時条件を持っています。`);
+      }
+      // 対象／対象外は「いつ確定したか」が必ず要る。空・不正な形式・実在しない日時は受理しない
+      // （形だけ確定済みで日時が空、という状態を読み込ませない）。
+      if (rec.state !== "未確認" && !isValidDecidedAt(rec.decidedAt)) {
+        return err(`decisions[${i}].decidedAt が確定日時の形式（YYYY-MM-DD HH:MM）でないか、実在しない日時です。`);
+      }
+      if (rec.cond !== null) {
+        const c = rec.cond;
+        if (!c || typeof c !== "object" || Array.isArray(c)) return err(`decisions[${i}].cond がオブジェクトでも null でもありません。`);
+        for (const f of COND_FIELDS) {
+          if (!isStr(c[f])) return err(`decisions[${i}].cond.${f} が文字列ではありません。`);
+        }
+        if (!PARENT_LINKS.includes(c.parentLink)) return err(`decisions[${i}].cond.parentLink の値が不正です。`);
+        // 親が一意に解決できたときだけ rid を持つ。それ以外で rid を持たない
+        // （＝任意の親を選んで「確定した」ことにしない）
+        if (c.parentLink === "one") {
+          if (!RID_FORMAT.test(c.parentRid)) return err(`decisions[${i}].cond.parentRid の形式が不正です。`);
+        } else if (c.parentRid !== "") {
+          return err(`decisions[${i}].cond.parentRid は親が一意に解決したときだけ設定できます。`);
+        }
+      }
+    }
+    decisions = d.decisions;
+  }
+
   // 追加行の採番に必要な情報（keyの数値部分）を、置換前にここで確定させておく。
   // 検証に失敗した場合は採番状態を一切変えないため、_id はまだ更新しない。
   //
@@ -357,7 +616,8 @@ export function parseImportedData(d) {
 
   return {
     ok: true,
-    data: { runs: d.runs, regs: planned.regs, cert: d.cert },
+    // decisions が無い旧形式は空配列（＝全件未確認）。既存3領域は従来どおりそのまま返す。
+    data: { runs: d.runs, regs: planned.regs, cert: d.cert, decisions },
     maxId,
     maxRid: planned.maxRid,
   };
@@ -635,6 +895,23 @@ export default function IListApp() {
     reader.onload = () => {
       try {
         const d = JSON.parse(reader.result);
+        // ── API版への誤投入ガード ──
+        // 単体版（サーバなし）で作ったJSONには decisions（人の適用判断）が入る。
+        // API版は decisions を保存できない（サーバは runs/regs/cert しか持たない）ため、
+        // そのまま取り込むと自動保存のPUTで判断が黙って捨てられる。
+        // state を置き換える前に拒否する。ここで return するので
+        //   ・setRuns/setRegs/setCert に到達しない＝stateが変わらない
+        //   ・保存Effectが再実行されない＝この読込を原因とするPUTが発生しない
+        // ただし、これは *いま動いているこのフロントエンド* の誤投入を止めるだけである。
+        // 配布済みの古いビルド、curl等での直接PUT、サーバ側の検証は守れない。
+        if (d && typeof d === "object" && !Array.isArray(d) && d.decisions !== undefined) {
+          alert(
+            "このファイルは単体版（サーバなし）の判断データを含んでいます。\n" +
+            "サーバ保存版は判断データを保存できないため、読み込みを中止しました。\n\n" +
+            "（現在のデータは変更していません。単体版のHTMLで開いてください）"
+          );
+          return;
+        }
         if (d.runs && d.regs && d.cert) {
           // 法規行の内部キーを補う（受理条件は変えない）。共有カウンタは反映時にだけ進める。
           const planned = planRegKeys(d.regs, peekIds().rid);
@@ -691,26 +968,153 @@ export default function IListApp() {
 }
 
 // ===== 帳票（マトリクス） =====
-export function MatrixView({ runs, regs, evalCell, summary, colorOf }) {
+// decisions / onSaveDecision / onRecheckRun は省略可能。
+// 省略した場合（API版）は判断のUIを一切描画せず、従来どおりの帳票になる。
+// ───────────────────────────────────────────────
+// 帳票の列（型式ラン）表示フィルター（単体HTML版のみ・columnFilter プロップで有効化）
+//
+//   ・軸は2つ：プロジェクトコード（run.gen）／車両型式（run.typeId）。それぞれ複数選択。
+//     欄内の複数選択は OR、プロジェクトコード欄と車両型式欄のあいだは AND。いずれも完全一致。
+//   ・未選択の欄は「その項目の制限なし」。両欄未選択＝全件表示（初期状態）。
+//   ・列＝型式ラン単位（run.key）。元の列順・法規行はそのまま。該当ランが複数でも全て表示。
+//   ・選択候補は「元の全データ」から重複を除いて作る（表示中の列からではない）。
+//   ・この絞り込みは表示だけ：runs/regs/cert/decisions を削らない・置換しない・dirty にしない。
+//     保存形式へ追加しない（HTML/JSON には非表示列も含めた全データを保存する）。
+//   ・成功した別データの読込（dataGen 進行）で条件を全解除。不正読込・置換キャンセルでは保持。
+//   ・選択中の値が現データから消えても自動で外さない。「対象なし」と表示して手動解除できる。
+// ───────────────────────────────────────────────
+function ColumnFilterBar({ projectOptions, typeOptions, selProjects, setSelProjects, selTypes, setSelTypes, total, shown, active, onClearAll }) {
+  const toggle = (list, setList, v) => setList(list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+  const labelFor = (v) => (v === "" ? "（コード未設定）" : v);
+  const row = (title, options, sel, setSel) => {
+    const stale = sel.filter((v) => !options.includes(v));   // 選択済みだが現データに無い値も並べる（消さない）
+    const chips = [...options, ...stale];
+    return (
+      <div style={{ display:"flex", alignItems:"baseline", gap:6, flexWrap:"wrap" }}>
+        <span style={{ fontSize:10, color:MUTE, minWidth:92, flex:"none" }}>{title}</span>
+        {chips.length === 0 && <span style={{ fontSize:10, color:MUTE }}>（候補なし）</span>}
+        {chips.map((v) => {
+          const on = sel.includes(v);
+          const gone = !options.includes(v);
+          return (
+            <button key={"c:" + v} onClick={() => toggle(sel, setSel, v)}
+              title={gone ? "この値は現在のデータにありません。押すと選択を解除できます。" : undefined}
+              style={{ fontSize:10, padding:"2px 8px", borderRadius:999, cursor:"pointer", fontFamily:"inherit", lineHeight:1.4,
+                border:`1px solid ${on ? CYAN : LINE}`,
+                background: on ? "rgba(77,214,224,0.16)" : "transparent",
+                color: gone ? MUTE : on ? "#dff6f8" : "#aab8c6",
+                textDecoration: gone ? "line-through" : "none" }}>
+              {labelFor(v)}{gone && "（対象なし）"}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+  return (
+    <div style={{ background:PANEL, border:`1px solid ${LINE}`, borderRadius:10, padding:"9px 12px", marginBottom:10, display:"flex", flexDirection:"column", gap:6 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+        <span style={{ fontSize:10.5, fontWeight:700, color:"#eef4fa" }}>表示フィルター</span>
+        {active
+          ? <span style={{ fontSize:10, fontWeight:700, color:AMBER }}>絞り込み中：表示 {shown} ／ 全 {total} 列</span>
+          : <span style={{ fontSize:10, color:MUTE }}>全 {total} 列を表示中</span>}
+        <span style={{ flex:1 }} />
+        <button onClick={onClearAll} disabled={!active}
+          style={{ ...miniBtn, marginTop:0, cursor: active ? "pointer" : "default", opacity: active ? 1 : 0.5 }}>すべて表示</button>
+      </div>
+      {row("プロジェクトコード", projectOptions, selProjects, setSelProjects)}
+      {row("車両型式", typeOptions, selTypes, setSelTypes)}
+      <div style={{ fontSize:9, color:MUTE, lineHeight:1.55 }}>
+        同じ欄の複数選択はどれかに一致（OR）、プロジェクトコードと車両型式のあいだは両方一致（AND）。完全一致で抽出します。
+        絞り込みは表示中の列だけを変え、データ・保存・判断・集計には影響しません。
+      </div>
+    </div>
+  );
+}
+
+export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, onSaveDecision, onRecheckRun, dataGen, columnFilter }) {
   // 黄色は status="off"（否）の表示だけを差し替える注記であり、要否判定(status)そのものは変えない。
   // ok（緑）・leak（赤）の判定・配色には一切関与しない（既存の赤警告を黄色で弱めないため）。
+  // 人の適用判断もセルの色には一切関与しない（対象外を緑にしない・赤を消さない）。
   const cellStyle=(s, notice)=> s==="ok"?{bg:"rgba(63,191,143,0.13)",bd:GREEN,fg:GREEN}
     : s==="leak"?{bg:"rgba(255,107,87,0.16)",bd:RED,fg:RED}
     : notice?{bg:"rgba(224,178,77,0.14)",bd:AMBER,fg:AMBER}
     : {bg:"rgba(90,107,125,0.07)",bd:LINE,fg:MUTE};
-  if (runs.length===0 || regs.length===0)
+  // 判断機能はpropsが渡されたときだけ有効（フックは常に同じ順序で呼ぶ）
+  const judge = Array.isArray(decisions);
+  const [editing, setEditing] = useState(null);     // { runKey, rid } | null
+  // 編集領域の未保存の下書き（state/reason）。編集できるセルは常に1つなので1件だけ持つ。
+  // これを MatrixView 側に置くことで、表示フィルターで編集中の列が一時的に隠れても
+  // （MatrixView 自体はアンマウントされない）入力途中の理由・選択が保持され、再表示で戻る。
+  // 保存対象データ・dirty には一切関与しない。明示保存／キャンセル／成功読込で捨てる。
+  const [editDraft, setEditDraft] = useState(null); // { runKey, rid, state, reason } | null
+  const decIndex = useMemo(() => decisionIndex(decisions || []), [decisions]);
+  // データが丸ごと差し替わったら（＝読込が成功したら）開いている編集領域を閉じる。
+  // 編集領域は開いた時点の理由を自分の中に持つため、開いたまま置換すると
+  // 古い理由を新しい判断へ書き戻せてしまう。
+  // dataGen は「読込が成功したとき」だけ進む。不正ファイル・置換キャンセル・
+  // 古い読込の破棄では進めないので、編集途中の入力は保たれる。
+  useEffect(() => { setEditing(null); setEditDraft(null); }, [dataGen]);
+
+  // ── 列（型式ラン）表示フィルター ──
+  // columnFilter は単体版だけが渡す。選択状態は単体版（StandaloneApp）が保持し、
+  // タブ切替でこの部品がアンマウントされても選択が消えない。成功した別データ読込での全解除も単体版が行う。
+  // ここでは「表示する列を選ぶ」だけ：runs/regs/cert/decisions・保存・dirty には一切触れない。
+  const filterable = !!columnFilter;
+  const selProjects = columnFilter?.selProjects || [];   // run.gen の完全一致（欄内OR）
+  const selTypes = columnFilter?.selTypes || [];          // run.typeId の完全一致（欄内OR）
+  // 選択候補は「元の全データ」から重複を除く（表示中の列からではない）
+  const projectOptions = useMemo(() => [...new Set(runs.map((r) => r.gen))], [runs]);
+  const typeOptions = useMemo(() => [...new Set(runs.map((r) => r.typeId))], [runs]);
+  const filterActive = filterable && (selProjects.length > 0 || selTypes.length > 0);
+  // 欄内OR・欄間AND・完全一致。未選択の欄は制限なし。列順は runs の順を保つ。
+  // 同じ (gen, typeId) のランが複数あっても、条件に合えば全ランを残す（重複排除しない）。
+  const visibleRuns = !filterActive ? runs : runs.filter((run) =>
+    (selProjects.length === 0 || selProjects.includes(run.gen)) &&
+    (selTypes.length === 0 || selTypes.includes(run.typeId)));
+
+  if (runs.length===0 || regs.length===0) {
+    // データが空でも、保持している列フィルターの選択は見せて手動解除できるようにする
+    // （型式ラン・法規を全削除したあとに古い選択が残るケース。自動では解除しない）。
+    if (filterable && (selProjects.length > 0 || selTypes.length > 0)) {
+      return (
+        <>
+          <ColumnFilterBar
+            projectOptions={projectOptions} typeOptions={typeOptions}
+            selProjects={selProjects} setSelProjects={columnFilter.setSelProjects}
+            selTypes={selTypes} setSelTypes={columnFilter.setSelTypes}
+            total={runs.length} shown={0} active onClearAll={columnFilter.clear} />
+          <Empty msg="型式ランと法規を入力すると、ここに適合・実績の帳票が出ます。" />
+        </>
+      );
+    }
     return <Empty msg="型式ランと法規を入力すると、ここに適合・実績の帳票が出ます。" />;
+  }
   return (
     <>
       <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:10 }}>
         <Note color={CYAN}><b style={{color:CYAN}}>新型</b> 要⇔(新型適用≤LO)or(継続適用≤ドロップ)　<b style={{color:CYAN}}>継続</b> 要⇔継続適用≤ドロップ</Note>
         <Note color={AMBER}><Pencil size={10} color={AMBER}/> 手入れ＝法規DB・実績　<Cpu size={10} color={GREEN}/> 自動＝要否・申請発生・実効ドロップ</Note>
       </div>
+      {filterable && (
+        <ColumnFilterBar
+          projectOptions={projectOptions} typeOptions={typeOptions}
+          selProjects={selProjects} setSelProjects={columnFilter.setSelProjects}
+          selTypes={selTypes} setSelTypes={columnFilter.setSelTypes}
+          total={runs.length} shown={visibleRuns.length}
+          active={filterActive} onClearAll={columnFilter.clear} />
+      )}
+      {filterActive && visibleRuns.length === 0 ? (
+        <div style={{ background:PANEL, border:`1px dashed ${LINE}`, borderRadius:12, padding:"22px 16px", textAlign:"center", color:MUTE, fontSize:12, lineHeight:1.8 }}>
+          絞り込み条件に一致する型式ランがありません（<b style={{ color:AMBER }}>0 件</b>）。<br/>
+          条件を変えるか、上の「すべて表示」で解除してください（自動では全件に戻しません）。
+        </div>
+      ) : (
       <div style={{ background:PANEL, borderRadius:12, padding:14, border:`1px solid ${LINE}`, overflowX:"auto" }}>
         <table style={{ borderCollapse:"separate", borderSpacing:5, width:"100%" }}>
           <thead><tr>
             <th style={{ textAlign:"left", padding:"4px 8px", fontSize:10.5, color:MUTE, minWidth:150 }}>法規 \ 型式ラン</th>
-            {runs.map(run=>{ const col=colorOf(run.typeId); return (
+            {visibleRuns.map(run=>{ const col=colorOf(run.typeId); return (
               <th key={run.key} style={{ padding:"4px 6px", minWidth:138, verticalAlign:"top" }}>
                 <div style={{ display:"inline-flex", alignItems:"center", gap:4 }}>
                   <span style={{ width:7,height:7,borderRadius:2,background:col }}/>
@@ -718,6 +1122,12 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf }) {
                 </div>
                 <div style={{ fontSize:9.5, color:"#6b7d90", margin:"2px 0" }}>{run.gen}・{run.sk==="新"?"新型/指定":"継続/既指定"}</div>
                 <div style={{ fontSize:9, color:MUTE, fontFamily:"ui-monospace,monospace" }}>LO {fmt(run.lo)}<br/>drop {fmt(run.drop)}</div>
+                {judge && onRecheckRun && (
+                  <button onClick={()=>onRecheckRun(run.key)} style={miniBtn}
+                    title="このランの確定した判断（対象／対象外）をまとめて要再確認にします。理由・確定日時は消えません。">
+                    ⟳ 要再確認にする
+                  </button>
+                )}
               </th>);})}
           </tr></thead>
           <tbody>
@@ -732,11 +1142,14 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf }) {
                   </div>
                   <div style={{ fontSize:9, color:MUTE, fontFamily:"ui-monospace,monospace", paddingLeft:r.parent?8:0, marginTop:2 }}>新{fmt(r.shin)}・継{fmt(r.kei)}</div>
                 </td>
-                {runs.map(run=>{
+                {visibleRuns.map(run=>{
                   const c=evalCell(run,r);
                   // 黄色は判定式(evalCellWith)の外で計算する注記。status="off"以外には出さない。
                   const notice = approachingNoticeFor(c.status, run, r);
                   const st=cellStyle(c.status, !!notice);
+                  // 人の適用判断（propsが無ければ null のまま＝何も描画しない）
+                  const dec = judge ? findDecision(decIndex, run.key, r.rid) : null;
+                  const isEditing = judge && editing && editing.runKey===run.key && editing.rid===r.rid;
                   return (
                   <td key={run.key} style={{ padding:0 }}>
                     <div style={{ background:st.bg, border:`1px solid ${st.bd}`, borderRadius:7, padding:"7px 8px", minHeight:48, display:"flex", flexDirection:"column", justifyContent:"center", gap:2 }}>
@@ -750,6 +1163,15 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf }) {
                       {c.status==="leak" && <>
                         <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:800 }}>申請発生</span><Badge kind={c.kind}/></div>
                         <span style={{ fontSize:9, color:"#ffb3a8" }}>{c.dueDate<TODAY?"既発効・即対応":`${fmt(c.dueDate)}までに`}</span></>}
+                      {judge && !isEditing &&
+                        <DecisionLine dec={dec} run={run} reg={r} regs={regs}
+                          onOpen={()=>{ setEditing({ runKey:run.key, rid:r.rid }); setEditDraft(null); }} />}
+                      {isEditing &&
+                        <DecisionEditor run={run} reg={r} regs={regs} dec={dec} auto={c} notice={notice}
+                          draft={editDraft && editDraft.runKey===run.key && editDraft.rid===r.rid ? editDraft : null}
+                          onDraftChange={(d)=>setEditDraft({ runKey:run.key, rid:r.rid, ...d })}
+                          onCancel={()=>{ setEditing(null); setEditDraft(null); }}
+                          onSave={(rec)=>{ onSaveDecision(rec); setEditing(null); setEditDraft(null); }} />}
                     </div>
                   </td>);})}
               </tr>
@@ -757,12 +1179,31 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf }) {
           </tbody>
         </table>
       </div>
+      )}
       <div style={{ display:"flex", gap:16, marginTop:10, fontSize:10.5, color:MUTE, flexWrap:"wrap", alignItems:"center" }}>
         <Leg c={GREEN} t="要・認可書あり"/><Leg c={RED} t="要・実績なし＝申請発生"/><Leg c={MUTE} t="否＝対象外"/>
         <Leg c={AMBER} t="否・ドロップ後30日以内に継続規制＝要再確認"/>
         <span style={{ display:"inline-flex", gap:5 }}><Badge kind="新型"/>指定で適合<Badge kind="継続"/>継続対応</span>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:13, marginTop:22 }}>
+      {judge && (
+        <div style={{ marginTop:8, fontSize:10.5, color:"#8fa3b8", lineHeight:1.75, background:`${JUDGE}0d`, border:`1px solid ${JUDGE}33`, borderRadius:9, padding:"8px 12px" }}>
+          各セルの<b style={{color:"#eef4fa"}}>上段＝自動判定</b>（日程と認可書実績から計算）、
+          <b style={{color:JUDGE}}>下段「人：」＝人の適用判断</b>です。判断は型式ラン×法規行ごとに独立し、他のランへ引き継ぎません。
+          <b>人の判断で自動判定・警告が消えることはありません</b>（対象外にしても適合確認済みの緑にはなりません）。<br/>
+          アプリに入力していない装備変更などは自動検知できません。必要なときは各ランの見出しにある「⟳ 要再確認にする」で明示的に立ててください。
+          <span style={{ display:"inline-flex", alignItems:"center", gap:8, flexWrap:"wrap", marginTop:6 }}>
+            <span style={{ color:MUTE }}>下段の見分け：</span>
+            <DecisionTag state="対象" /><DecisionTag state="対象外" /><DecisionTag state="未確認" />
+            <RecheckBadge /><span style={{ color:MUTE }}>＝判断とは別の警告</span>
+          </span>
+        </div>
+      )}
+      {filterActive && (
+        <div style={{ marginTop:14, fontSize:10, color:MUTE, lineHeight:1.6 }}>
+          下の<b style={{ color:"#8fa3b8" }}>コンプラ漏れ・実効ドロップは全体集計</b>です（表示フィルターの影響を受けず、全 {runs.length} 列を対象にします）。
+        </div>
+      )}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:13, marginTop:filterActive?8:22 }}>
         <Card title="コンプラ漏れ（自動検出）" icon={<AlertTriangle size={15} color={RED}/>}>
           {summary.leaks.length===0 ? <p style={{ color:GREEN, fontSize:12.5, margin:0 }}>漏れなし。</p> :
             summary.leaks.map((l,i)=>(
@@ -788,8 +1229,181 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf }) {
   );
 }
 
+// ===== 人の適用判断：セル内の表示と編集 =====
+// 判断の色は自動判定（赤・緑・黄）とは別系統にする。
+// 「対象外＝適合確認済み」に見えてはいけないので、緑は絶対に使わない。
+export const JUDGE = "#9d8cff";
+
+// 人の適用判断（対象／対象外／未確認）をセル内で見分けるための小さなタグ。
+//   ・「対象」「対象外」「未確認」の文字は必ず出す（色を読めない環境でも判別できる）。
+//   ・色だけに頼らず、枠線の太さ・線種・角の形でも差をつける：
+//       対象   … 紫系のピル（角丸・実線・淡い塗り）。JUDGE を基調にする。
+//       対象外 … 対象とは別の寒色。角ばった箱＋太めの実線＋濃い下地で、対象と混同させない。
+//       未確認 … 破線のピル。控えめだが読める灰色（文字を薄くしすぎない）。
+//   ・セル背景（緑・赤・黄・暗色）に依らず読めるよう、タグ自身に下地・枠・明るい文字色を持たせる。
+//   ・要再確認は判断状態とは独立した黄色（AMBER）の警告として別に描く（このタグでは扱わない）。
+const DECISION_TAG = {
+  "対象":   { fg:"#ece8ff", bg:"rgba(157,140,255,0.22)", border:`1px solid ${JUDGE}`,  radius:999 },
+  "対象外": { fg:"#dce7f6", bg:"rgba(9,16,26,0.82)",     border:"1.5px solid #8ea6c8", radius:3   },
+  "未確認": { fg:"#9aabbd", bg:"rgba(12,20,32,0.55)",    border:`1px dashed ${MUTE}`,  radius:999 },
+};
+export function DecisionTag({ state }) {
+  const t = DECISION_TAG[state] || DECISION_TAG["未確認"];
+  return (
+    <span style={{
+      display:"inline-flex", alignItems:"center", lineHeight:1.15, letterSpacing:0.2,
+      fontSize:9.5, fontWeight:700, color:t.fg, background:t.bg,
+      border:t.border, borderRadius:t.radius, padding:"0 4px", whiteSpace:"nowrap",
+    }}>{state}</span>
+  );
+}
+
+// 要再確認バッジ（判断状態から独立した黄色の警告）。文言に「要再確認」を必ず含める。
+export function RecheckBadge() {
+  return (
+    <span style={{
+      display:"inline-flex", alignItems:"center", gap:2, whiteSpace:"nowrap",
+      fontSize:9, fontWeight:700, color:AMBER,
+      background:`${AMBER}1f`, border:`1px solid ${AMBER}`, borderRadius:3, padding:"0 3px",
+    }}><AlertTriangle size={9}/>要再確認</span>
+  );
+}
+
+// 長い理由をセル内で1行に畳む（内容は変えない。全文は編集領域で見る）。
+const oneLine = (s, max = 34) => {
+  const t = (s || "").replace(/\s+/g, " ").trim();
+  return t.length > max ? t.slice(0, max) + "…" : t;
+};
+
+// セル下段の「人：」行。レコードが無ければ未確認として扱う。
+function DecisionLine({ dec, run, reg, regs, onOpen }) {
+  const state = dec?.state || "未確認";
+  // 保存済みのフラグ（sticky）と、いま条件から導かれる理由の両方を見る。
+  // 掃き出しEffectが走る前でも取りこぼさないため。
+  const live = dec ? recheckReasons(dec, run, reg, regs) : [];
+  const recheck = !!dec?.needsRecheck || live.length > 0;
+  const reason = dec?.reason || "";
+  return (
+    <div style={{ borderTop:`1px dashed ${LINE}`, marginTop:5, paddingTop:4, display:"flex", flexDirection:"column", gap:3 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+        <span style={{ fontSize:9, color:MUTE, flex:"none" }}>人：</span>
+        <DecisionTag state={state} />
+        {recheck && <RecheckBadge />}
+        <span style={{ flex:1, minWidth:4 }} />
+        <button onClick={onOpen} aria-label="適用判断・理由メモを編集"
+          style={{ display:"inline-flex", alignItems:"center", flex:"none", cursor:"pointer",
+            background:`${JUDGE}1f`, border:`1px solid ${JUDGE}66`, borderRadius:5,
+            color:JUDGE, lineHeight:0, padding:"2px 4px" }}
+          title="適用判断・理由メモを編集"><Pencil size={11} color={JUDGE}/></button>
+      </div>
+      {hasReason(reason) && (
+        <span style={{ fontSize:9, color:"#8fa3b8", lineHeight:1.5 }}>
+          <span style={{ color:MUTE }}>理由：</span>{oneLine(reason)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// セルから開く小さな編集領域（新しいタブ・画面切替は作らない）。
+//
+// 保存の意味を2つに分ける（v0.1の「メモ編集だけでは日時を更新せず、再確認済みにもしない」）：
+//   ・選んだ状態が保存済みと同じ  … 理由だけを保存する。確定日時・確定時条件・要再確認は触らない
+//   ・選んだ状態が保存済みと違う  … 状態変更なので確定日時・確定時条件を更新する（未確認へ戻す場合は空にする）
+// 要再確認の解除は「この内容で再確定」だけ。条件を元に戻す・メモを直す・読み直すでは解除されない。
+function DecisionEditor({ run, reg, regs, dec, auto, notice, onSave, onCancel, draft, onDraftChange }) {
+  const stored = dec?.state || "未確認";
+  // 未保存の下書きがあれば（＝この列がフィルターで一時的に隠れて再表示された等）そこから復元する。
+  // 無ければ保存済みの判断から開始する（従来どおり）。
+  const [state, setState] = useState(draft?.state ?? stored);
+  const [reason, setReason] = useState(draft?.reason ?? (dec?.reason || ""));
+  const [msg, setMsg] = useState("");
+  // 入力のたびに MatrixView 側の下書きへ写す（保存対象データ・dirty には触れない）。
+  // 状態と理由は同時には変わらないので、変わっていない側は現在値をそのまま渡す。
+  const changeState = (s) => { setState(s); setMsg(""); onDraftChange?.({ state: s, reason }); };
+  const changeReason = (v) => { setReason(v); setMsg(""); onDraftChange?.({ state, reason: v }); };
+  const live = dec ? recheckReasons(dec, run, reg, regs) : [];
+  const recheck = !!dec?.needsRecheck || live.length > 0;
+  const sameState = state === stored;
+
+  const needReason = () => {
+    if (state === "対象外" && !hasReason(reason)) {
+      setMsg("「対象外」には理由が必要です（空白だけでは確定できません）。");
+      return true;
+    }
+    return false;
+  };
+  const confirmRec = () => ({
+    runKey: run.key, rid: reg.rid, state, reason,
+    decidedAt: nowStamp(), needsRecheck: false, cond: condOf(run, reg, regs),
+  });
+  const save = () => {
+    if (needReason()) return;
+    if (sameState) {
+      // メモだけの保存。確定日時・確定時条件・要再確認フラグは一切変えない。
+      const base = dec || { runKey:run.key, rid:reg.rid, state:"未確認", reason:"", decidedAt:"", needsRecheck:false, cond:null };
+      onSave({ ...base, reason });
+    } else if (state === "未確認") {
+      // 未確認へ戻す：理由は誤消去を避けて残し、有効な確定日時と確定時条件は空にする
+      onSave({ runKey:run.key, rid:reg.rid, state:"未確認", reason, decidedAt:"", needsRecheck:false, cond:null });
+    } else {
+      onSave(confirmRec());
+    }
+  };
+  const reconfirm = () => { if (!needReason()) onSave(confirmRec()); };
+
+  const autoText = auto.status==="ok" ? `要・認可書あり（${auto.ck}）`
+    : auto.status==="leak" ? "要・実績なし＝申請発生"
+    : "否（日程上の適用対象外）";
+  return (
+    <div style={{ marginTop:5, borderTop:`1px dashed ${LINE}`, paddingTop:6, display:"flex", flexDirection:"column", gap:6, textAlign:"left" }}>
+      <div style={{ fontSize:9, color:MUTE, lineHeight:1.6 }}>
+        <div><b style={{ color:"#eef4fa" }}>{run.typeId}</b>（{run.gen||"—"}）× <b style={{ color:"#eef4fa" }}>{reg.id||"（法規ID未入力）"}</b></div>
+        <div>自動：{autoText}{auto.required && auto.dueDate ? `／${auto.kind}適用 ${fmt(auto.dueDate)}` : ""}</div>
+        {notice && <div style={{ color:AMBER }}>継続規制まで{notice.days}日（{fmt(notice.keiDate)}）</div>}
+      </div>
+
+      <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+        {DECISION_STATES.map((s)=>(
+          <label key={s} style={{ display:"flex", alignItems:"center", gap:5, fontSize:10.5, cursor:"pointer",
+            fontWeight: state===s ? 700 : 400 }}>
+            <input type="radio" name={`dec-${run.key}-${reg.rid}`} checked={state===s}
+              onChange={()=>changeState(s)} style={{ margin:0 }} />
+            <DecisionTag state={s} />{s==="対象外" && <span style={{ fontSize:9, color:MUTE }}>（理由必須）</span>}
+          </label>
+        ))}
+      </div>
+
+      <textarea value={reason} onChange={(e)=>changeReason(e.target.value)}
+        placeholder="理由・メモ（そのまま文字として保存されます）" rows={3}
+        style={{ background:"#0c1623", border:`1px solid ${LINE}`, borderRadius:6, color:"#cdd9e5", fontSize:10.5, padding:"5px 6px", width:"100%", boxSizing:"border-box", resize:"vertical", fontFamily:"inherit" }} />
+
+      {recheck && (
+        <div style={{ fontSize:9, color:AMBER, lineHeight:1.6 }}>
+          ⚠ 要再確認{live.length>0 && <>：{live.join("／")}</>}
+          {dec?.decidedAt && <div style={{ color:MUTE }}>前回の確定：{dec.decidedAt}（判断・理由は残しています）</div>}
+        </div>
+      )}
+      {!recheck && dec?.decidedAt && <div style={{ fontSize:9, color:MUTE }}>確定：{dec.decidedAt}</div>}
+      {msg && <div style={{ fontSize:9.5, color:RED }}>{msg}</div>}
+
+      <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+        <button onClick={save} style={miniBtn}>{sameState ? "メモを保存" : state==="未確認" ? "未確認に戻す" : "この判断で確定"}</button>
+        {recheck && sameState && state!=="未確認" &&
+          <button onClick={reconfirm} style={{ ...miniBtn, borderColor:AMBER, color:AMBER }}>この内容で再確定</button>}
+        <button onClick={onCancel} style={miniBtn}>キャンセル</button>
+      </div>
+      <div style={{ fontSize:8.5, color:MUTE, lineHeight:1.55 }}>
+        人の判断は自動判定・認可書実績を書き換えません。装備変更などアプリに入力していない条件は自動検知できません。
+      </div>
+    </div>
+  );
+}
+
 // ===== 型式ラン編集 =====
-export function RunsEditor({ runs, setRuns, colorOf, nextKey }) {
+// onDeleteRun は省略可能。渡された場合、行の削除と同じ操作でその行を参照する判断も取り除く
+// （参照整合性のため。既存の削除手順そのものは変えていない）。
+export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun }) {
   const up=(key,field,val)=>setRuns(rs=>rs.map(r=>r.key===key?{...r,[field]:val}:r));
   // キーの確保は updater の外で行う。
   // updater 内で採番すると、StrictMode などで再実行されたときに採番だけが余分に進む
@@ -800,11 +1414,12 @@ export function RunsEditor({ runs, setRuns, colorOf, nextKey }) {
     catch (e) { alert(e.message); return; }   // 上限到達：データも採番も変えずに知らせる
     setRuns(rs=>[...rs,{key,typeId:"",gen:"",sk:"新",lo:"",drop:""}]);
   };
-  const del=(key)=>setRuns(rs=>rs.filter(r=>r.key!==key));
+  // 行の削除と、その行を参照する判断の削除は同じ操作で行う（同一イベント内でまとめて反映される）
+  const del=(key)=>{ setRuns(rs=>rs.filter(r=>r.key!==key)); onDeleteRun?.(key); };
   return (
-    <EditorShell title="型式ラン（型式 × プロジェクト）" desc="型式・プロジェクト（世代）・新継・LO・ドロップを入力。同じ型式を複数ランで使える（新→継など）。" onAdd={add} addLabel="ランを追加">
+    <EditorShell title="型式ラン（型式 × プロジェクト）" desc="車両型式・プロジェクトコード・新継・LO・ドロップを入力。同じ型式を複数ランで使える（新→継など）。プロジェクトコードは任意の識別記号（世代・MC・継承関係は推測しない）。" onAdd={add} addLabel="ランを追加">
       <table style={tbl}>
-        <thead><tr>{["型式","プロジェクト/世代","新継","LO（生産開始）","ドロップ（生産終了）",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+        <thead><tr>{["型式","プロジェクトコード","新継","LO（生産開始）","ドロップ（生産終了）",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>
           {runs.map(r=>(
             <tr key={r.key}>
@@ -826,7 +1441,8 @@ export function RunsEditor({ runs, setRuns, colorOf, nextKey }) {
 }
 
 // ===== 法規DB編集 =====
-export function RegsEditor({ regs, setRegs }) {
+// onDeleteReg は省略可能（RunsEditor の onDeleteRun と同じ考え方）。
+export function RegsEditor({ regs, setRegs, onDeleteReg }) {
   // 行の同一性は内部キー rid で判定する。
   // 法規ID(id)は利用者が入力する値で、空や重複がありうるため同一性には使えない
   // （id で判定すると、空ID2行の片方を編集・削除したときに両方が対象になってしまう）。
@@ -838,7 +1454,7 @@ export function RegsEditor({ regs, setRegs }) {
     catch (e) { alert(e.message); return; }   // 上限到達：データも採番も変えずに知らせる
     setRegs(rs=>[...rs,{rid,id:"",label:"",shin:"",kei:"",parent:""}]);
   };
-  const del=(rid)=>setRegs(rs=>rs.filter(r=>r.rid!==rid));
+  const del=(rid)=>{ setRegs(rs=>rs.filter(r=>r.rid!==rid)); onDeleteReg?.(rid); };
   return (
     <EditorShell title="法規DB" desc="法規ID（UN番号）・名称・新型適用日・継続適用日を入力。シリーズアップは親法規を選ぶと帳票で↳表示される。" onAdd={add} addLabel="法規を追加">
       <table style={tbl}>
@@ -967,3 +1583,6 @@ const th={ textAlign:"left", padding:"6px 8px", fontSize:10.5, color:MUTE, fontW
 const td={ padding:"5px 8px", borderBottom:`1px solid ${LINE}` };
 const inp={ background:"#0c1623", border:`1px solid ${LINE}`, borderRadius:6, color:"#cdd9e5", fontSize:11.5, padding:"6px 8px", width:130, boxSizing:"border-box" };
 const iconBtn={ background:"transparent", border:"none", cursor:"pointer", padding:4 };
+// 判断まわりの小さなボタン（帳票セル・列見出しで使う）
+const miniBtn={ background:"transparent", border:`1px solid ${LINE}`, borderRadius:5, color:"#aab8c6",
+  fontSize:9.5, padding:"3px 6px", cursor:"pointer", fontFamily:"inherit", lineHeight:1.3, marginTop:4 };

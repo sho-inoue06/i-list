@@ -15,6 +15,8 @@ import {
   SEED, nextKey, parseImportedData, applyImported, evalCellWith, summarize,
   buildSavedHtml,
   MatrixView, RunsEditor, RegsEditor, CertEditor,
+  sweepRecheck, upsertDecision, normalizeDecisions, markRunNeedsRecheck,
+  pruneDecisionsByRun, pruneDecisionsByReg,
   INK, PALETTE, btn,
 } from "../src/IListApp.jsx";
 
@@ -54,6 +56,8 @@ export default function StandaloneApp({ bootData } = {}) {
   const [runs, _setRuns] = useState(bootOk ? bootData.data.runs : SEED.runs);
   const [regs, _setRegs] = useState(bootOk ? bootData.data.regs : SEED.regs);
   const [cert, _setCert] = useState(bootOk ? bootData.data.cert : SEED.cert);
+  // 人の適用判断。SEEDには含めない（初期表示は全件未確認＝レコードなし）。
+  const [decisions, _setDecisions] = useState(bootOk ? bootData.data.decisions : []);
   const [tab, setTab] = useState("帳票");
   const [state, setState] = useState(bootOk ? "htmlImported" : "clean");
   const fileRef = useRef(null);
@@ -72,10 +76,23 @@ export default function StandaloneApp({ bootData } = {}) {
   // これにより、後から選んだファイルより古い読込結果がデータや表示を上書きしない。
   const loadGen = useRef(0);
 
+  // データ置換が成功した回数。読込が成功したときだけ進める。
+  // 帳票側はこれが変わったときに、開いている判断の編集領域を閉じる
+  // （開いたままだと、古い理由を新しい判断へ書き戻せてしまうため）。
+  // 不正ファイル・置換キャンセル・古い読込の破棄では進めないので、編集途中の入力は保たれる。
+  const [dataGen, setDataGen] = useState(0);
+
   // 「未書き出しかどうか」を、読取完了時点の最新の値で判定するための参照。
   // ファイル選択時のdirtyをそのまま使うと、読取中に行われた編集を見落とす。
   const dirtyRef = useRef(false);
   const setSaveState = (next) => { dirtyRef.current = (next === "dirty"); setState(next); };
+
+  // 帳票の列（型式ラン）表示フィルター：プロジェクトコード(run.gen)／車両型式(run.typeId)の複数選択。
+  // 一時的なUI状態。保存形式には入れず、dirty にもしない。runs/regs/cert/decisions は削らない・置換しない。
+  // 成功した別データの読込でだけ全解除する（下の importJSON 成功時）。不正読込・置換キャンセルでは保持。
+  const [selProjects, setSelProjects] = useState([]);
+  const [selTypes, setSelTypes] = useState([]);
+  const clearColumnFilter = () => { setSelProjects([]); setSelTypes([]); };
 
   // データ変更を受け付けた時点で「未書き出し」にする。
   // updater関数もそのまま渡せるよう、副作用はupdaterの外（呼び出し時）で行う。
@@ -83,8 +100,42 @@ export default function StandaloneApp({ bootData } = {}) {
   const setRuns = (v) => { markDirty(); _setRuns(v); };
   const setRegs = (v) => { markDirty(); _setRegs(v); };
   const setCert = (v) => { markDirty(); _setCert(v); };
+  const setDecisions = (v) => { markDirty(); _setDecisions(v); };
 
   const dirty = state === "dirty";
+
+  // 要再確認フラグの掃き出し。
+  //   ・立てるだけで下ろさない（条件を元に戻す・メモ編集・読み直しでは解除されない）。
+  //   ・解除はセルの「この内容で再確定」だけ。
+  //
+  // 立った要再確認は「保存対象のデータが変わった」ことを意味する。人の明示再確定でしか
+  // 下ろさない以上、書き出さずに閉じれば失われる情報である。したがって boot・読込を含め、
+  // 実際に変化したときは未書き出し表示・dirtyRef へ反映する。これにより
+  // 終了時の警告ハンドラが登録され、次の読込でも置換確認が出る。
+  //
+  // 変化が無いときは sweepRecheck が同じ配列参照を返すので、
+  // 不要な dirty も再実行のループも起こさない（保存直後に理由なく dirty へ戻らない）。
+  useEffect(() => {
+    const swept = sweepRecheck(decisions, runs, regs);
+    if (swept === decisions) return;
+    _setDecisions(swept);
+    markDirty();
+  }, [runs, regs, decisions]);
+
+  // ── 判断の編集・整合 ──
+  // セルの編集領域から確定・メモ保存された1件を反映する（他の判断には触れない）。
+  const handleSaveDecision = (rec) => setDecisions((ds) => upsertDecision(ds, rec));
+  // ランの見出しからの手動要再確認（装備変更など自動検知できない条件のため）。
+  const handleRecheckRun = (runKey) => setDecisions((ds) => markRunNeedsRecheck(ds, runKey));
+  // 行削除と同じ操作で、その行を参照する判断だけを取り除く（孤立参照を作らない）。
+  const handleDeleteRun = (runKey) => setDecisions((ds) => pruneDecisionsByRun(ds, runKey));
+  const handleDeleteReg = (rid) => setDecisions((ds) => pruneDecisionsByReg(ds, rid));
+
+  // 書き出す中身。
+  // 掃き出しEffectの反映を待たずに済むよう、ここでも同じ sweepRecheck を通してから書き出す
+  // （純関数なので結果は同じ。Effectより先に保存ボタンが押されても古いフラグを書き出さない）。
+  // 情報を持たない未確認レコードは落とす（レコード無し＝未確認と同義）。
+  const snapshot = () => ({ runs, regs, cert, decisions: normalizeDecisions(sweepRecheck(decisions, runs, regs)) });
 
   // 未書き出しのまま閉じようとしたら警告する。
   // ブラウザ依存であり、これはデータ保存の代わりにはならない。
@@ -102,7 +153,7 @@ export default function StandaloneApp({ bootData } = {}) {
   const summary = useMemo(() => summarize(runs, regs, cert), [runs, regs, cert]);
 
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ runs, regs, cert }, null, 2)], { type:"application/json" });
+    const blob = new Blob([JSON.stringify(snapshot(), null, 2)], { type:"application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = `ilist_data_${new Date().toISOString().slice(0,10)}.json`;
@@ -122,7 +173,7 @@ export default function StandaloneApp({ bootData } = {}) {
     if (htmlSaveBusy) return;
     setHtmlSaveBusy(true);
     try {
-      const built = buildSavedHtml({ runs, regs, cert });
+      const built = buildSavedHtml(snapshot());
       if (!built.ok) throw new Error(built.error);
       const blob = new Blob([built.html], { type: "text/html" });
       const url = URL.createObjectURL(blob);
@@ -182,12 +233,19 @@ export default function StandaloneApp({ bootData } = {}) {
       // 確認ダイアログの表示中に別の読込が始まっている可能性があるため、置換直前に再確認する
       if (isStale()) return;
 
-      const { runs: nextRuns, regs: nextRegs, cert: nextCert } = parsed.data;
+      const { runs: nextRuns, regs: nextRegs, cert: nextCert, decisions: nextDecisions } = parsed.data;
+      const sweptDecisions = sweepRecheck(nextDecisions, nextRuns, nextRegs);
       _setRuns(nextRuns); _setRegs(nextRegs); _setCert(nextCert);
+      _setDecisions(sweptDecisions);
+      setDataGen((g) => g + 1);          // 置換が成功したので、開いている編集領域を閉じさせる
+      clearColumnFilter();               // 別データに替わったので列表示フィルターは全解除する
+
       // 採番は「置換確認と最新世代の確認を通過した反映時」だけ動かす。
       // runs(_id) と rid(_rid) の両方をまとめて整合させる。
       applyImported({ maxId: parsed.maxId, maxRid: parsed.maxRid });
-      setSaveState("imported");
+      // 読込時の掃き出しで変わった保存対象も保護する。
+      // 後続Effectでは既に整合済みなので、ここでdirtyRefと保存表示を同時に更新する。
+      setSaveState(sweptDecisions !== nextDecisions ? "dirty" : "imported");
     };
     reader.onerror = () => {
       if (isStale()) return;              // 古い読込の失敗で表示を変えない
@@ -235,7 +293,9 @@ export default function StandaloneApp({ bootData } = {}) {
           「データ入りHTMLを保存」で作ったファイルは、次回そのまま開けば保存時点のデータで再開できます（JSONの選択は不要）。<br />
           いずれも<strong>ダウンロードを開始したことしか分かりません</strong>。実際にディスクへ保存されたかはブラウザの表示で確認してください。
           元のファイルは自動更新されません（開き直しても保存前の内容のままです）。<br />
-          タブを閉じる際の警告はブラウザによって出ないことがあります。<strong>警告はデータ保存の代わりにはなりません。</strong>
+          タブを閉じる際の警告はブラウザによって出ないことがあります。<strong>警告はデータ保存の代わりにはなりません。</strong><br />
+          人の適用判断・理由メモは、この単体版で作るファイルにだけ入ります。<strong>サーバ保存版（API版）では読み込めません</strong>（誤って選んでも取り込まずに中止します）。
+          古い版のアプリが新しい項目を無視することは「互換」ではありません。<strong>元のファイルは消さずに残してください。</strong>
         </div>
 
         {/* タブ */}
@@ -252,9 +312,11 @@ export default function StandaloneApp({ bootData } = {}) {
         </div>
 
         {/* 画面本体（API版と同じ部品を使う） */}
-        {tab==="帳票" && <MatrixView {...{runs,regs,evalCell,summary,colorOf}} />}
-        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey}} />}
-        {tab==="法規DB" && <RegsEditor {...{regs,setRegs}} />}
+        {tab==="帳票" && <MatrixView {...{runs,regs,evalCell,summary,colorOf,decisions,dataGen}}
+          columnFilter={{ selProjects, setSelProjects, selTypes, setSelTypes, clear: clearColumnFilter }}
+          onSaveDecision={handleSaveDecision} onRecheckRun={handleRecheckRun} />}
+        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey}} onDeleteRun={handleDeleteRun} />}
+        {tab==="法規DB" && <RegsEditor {...{regs,setRegs}} onDeleteReg={handleDeleteReg} />}
         {tab==="認可書実績" && <CertEditor {...{typeIds,regs,cert,setCert,colorOf,evalCell,runs}} />}
       </div>
     </div>
