@@ -47,8 +47,8 @@ export const SEED = {
   // 比較元・同一性（F-04）の例。単体版の初期表示だけが使う（API版はこの2つを持たない）。
   //   r3×B 同一       … 継続車日を借りて「否」（新継どおりなら新型車日で既発効）
   //   r5×B 同一でない … 000Cで装置変更。新型車日（過去）で申請発生・期限超過
-  //   r5×D 同一でない … LO≥継続車日なので結論は変わらず、要再確認も立たない（実績ありで緑）
-  //   r3×D 未確認     … 同一から未確認へ戻した例。要再確認が残っている
+  //   r5×D 同一でない … LO≥継続車日なので結論は変わらず、要再確認も立たない（実績ありで緑。実績ありのセルは要再確認を出さない）
+  //   r3×C 未確認     … 同一から未確認へ戻した例。実績が無いので要再確認が残っている
   //   r7×E 同一でない … 初回回答で要再確認が立った例。新型車の式だが継続車日で要になる
   //   r7×C 未確認     … 手を付けていない例（同一と答えると期日が変わる）
   bases:[
@@ -60,7 +60,7 @@ export const SEED = {
     {runKey:"r3",rid:"g3",value:"同一",reason:"ダミー：比較元と装置は同じ",decidedAt:"2026-09-19 10:05",needsRecheck:false,baseRunKey:"r2"},
     {runKey:"r5",rid:"g3",value:"同一でない",reason:"ダミー：000Cで装置を変更",decidedAt:"2026-09-19 10:06",needsRecheck:false,baseRunKey:"r4"},
     {runKey:"r5",rid:"g5",value:"同一でない",reason:"ダミー：LO≥継続車日なので結論は変わらない",decidedAt:"2026-09-19 10:07",needsRecheck:false,baseRunKey:"r4"},
-    {runKey:"r3",rid:"g5",value:"未確認",reason:"ダミー：確認し直すため未確認に戻した",decidedAt:"",needsRecheck:true,baseRunKey:""},
+    {runKey:"r3",rid:"g4",value:"未確認",reason:"ダミー：確認し直すため未確認に戻した",decidedAt:"",needsRecheck:true,baseRunKey:""},
     {runKey:"r7",rid:"g6",value:"同一でない",reason:"ダミー：初回の回答",decidedAt:"2026-09-19 10:08",needsRecheck:true,baseRunKey:"r6"},
   ],
 };
@@ -1447,7 +1447,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                         <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c}
                           onOpen={base.state==="ok" ? ()=>{ setEditing(null); setEditDraft(null); setEditingSame({ runKey:run.key, rid:r.rid }); setSameDraft(null); } : null} />}
                       {isEditingSame &&
-                        <SamenessEditor rec={sameRec} run={run} reg={r} base={base}
+                        <SamenessEditor rec={sameRec} run={run} reg={r} base={base} hasCert={!!c.ck}
                           draft={sameDraft && sameDraft.runKey===run.key && sameDraft.rid===r.rid ? sameDraft : null}
                           onDraftChange={(d)=>setSameDraft({ runKey:run.key, rid:r.rid, ...d })}
                           onCancel={()=>{ setEditingSame(null); setSameDraft(null); }}
@@ -1491,7 +1491,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
         <div style={{ marginTop:8, fontSize:10.5, color:"#8fa3b8", lineHeight:1.75, background:`${SAME}0d`, border:`1px solid ${SAME}33`, borderRadius:9, padding:"8px 12px" }}>
           <b style={{color:SAME}}>「同一性：」</b>は比較元（型式ランタブで選ぶ・同じプロジェクト内の別型式）と当該装置の性能が同一かの回答です。比較元を選んだランの列にだけ出ます。
           <b style={{color:"#eef4fa"}}>同一</b>＝継続車側の規制日を適用、<b style={{color:"#eef4fa"}}>同一でない</b>＝新型車側の規制日を適用、未確認＝従来どおり新継で判定します。
-          同一でない・未確認に変わると<b>要再確認</b>になり、メモの保存では消えず、同一性を答え直して確定したときだけ消えます。
+          同一でない・未確認に変わると<b>要再確認</b>になり、メモの保存では消えず、同一性を答え直して確定したときだけ消えます。認可書の実績があるセルには要再確認を出しません。
           <span style={{ display:"inline-flex", alignItems:"center", gap:8, flexWrap:"wrap", marginTop:6 }}>
             <span style={{ color:MUTE }}>見分け：</span>
             <SamenessTag value="同一" /><SamenessTag value="同一でない" /><SamenessTag value="未確認" />
@@ -1574,7 +1574,8 @@ function SamenessLine({ rec, run, reg, base, auto, onOpen }) {
   const shown = eff ?? "未確認";
   const stale = !!rec && rec.value !== "未確認" && eff === "未確認";
   const live = samenessRecheckReasons(rec, run, reg, base);
-  const recheck = !!rec?.needsRecheck || live.length > 0;
+  // 認可書の実績があるセルでは要再確認を出さない（記録上のフラグは残す。実績を消すとまた出る）
+  const recheck = !auto.ck && (!!rec?.needsRecheck || live.length > 0);
   // 同一でない→新型車日で、適用日が過去なのに実績がない＝期限超過（要再確認の有無と関係なく出す）
   const overdue = auto.applied === "新型車日" && auto.status === "leak" && auto.dueDate && auto.dueDate < TODAY;
   return (
@@ -1604,14 +1605,14 @@ function SamenessLine({ rec, run, reg, base, auto, onOpen }) {
 }
 
 // セルから開く同一性の編集領域。
-function SamenessEditor({ rec, run, reg, base, onSave, onCancel, draft, onDraftChange }) {
+function SamenessEditor({ rec, run, reg, base, hasCert, onSave, onCancel, draft, onDraftChange }) {
   const stored = rec?.value || "未確認";
   const [value, _setValue] = useState(draft?.value ?? stored);
   const [reason, _setReason] = useState(draft?.reason ?? (rec?.reason || ""));
   const setValue = (v) => { _setValue(v); onDraftChange?.({ value: v, reason }); };
   const setReason = (v) => { _setReason(v); onDraftChange?.({ value, reason: v }); };
   const live = samenessRecheckReasons(rec, run, reg, base);
-  const recheck = !!rec?.needsRecheck || live.length > 0;
+  const recheck = !hasCert && (!!rec?.needsRecheck || live.length > 0);
   const same = value === stored;
   // 回答した時の比較元といまの比較元が違う回答（要再確認を立てないセルでも起こる）
   const stale = !!rec && rec.value !== "未確認" && base?.state === "ok" && rec.baseRunKey !== base.baseRunKey;

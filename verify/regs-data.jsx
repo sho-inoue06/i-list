@@ -628,10 +628,37 @@ const SCENARIOS = [
       asserts.checkTrue("r3×B 同一→継続車日で否", at(2, 2).includes("継続車日を適用") && at(2, 2).includes("否"));
       asserts.checkTrue("r5×B 同一でない→期限超過", at(4, 2).includes("新型車日を適用") && at(4, 2).includes("期限超過"));
       asserts.checkTrue("r5×D LO≥継続車日：要再確認なし・実績あり", !at(4, 4).includes("要再確認") && at(4, 4).includes("DEMO*D00/00*02"));
-      asserts.checkTrue("r3×D 未確認に戻した：要再確認", at(2, 4).includes("同一性：未確認") && at(2, 4).includes("要再確認"));
+      asserts.checkTrue("r3×C 未確認に戻した：要再確認（実績なし）", at(2, 3).includes("同一性：未確認") && at(2, 3).includes("要再確認"));
       asserts.checkTrue("r7×E 初回回答：要再確認・継続車日で要", at(6, 5).includes("要再確認") && at(6, 5).includes("新型車の式で判定・継続車日で要"));
       asserts.checkTrue("r7×C 未確認：新継どおり", at(6, 3).includes("新継どおり"));
       asserts.checkTrue("比較元の無い列に同一性は出ない", !at(3, 2).includes("同一性"));
+    },
+  },
+  {
+    id: "C5-no-recheck-when-certified",
+    name: "認可書の実績があるセルには要再確認を出さない（実績が無ければ出しっぱなし）",
+    expect: "実績ありのセルで同一でないへ変えても『要再確認』は出ない（記録上のフラグは残る）。実績を消すと出る。実績なしのセルは従来どおり出る",
+    async run({ mount, asserts }) {
+      const data = { ...clone(DUMMY), cert: { ...clone(DUMMY.cert), "DEMO-Q": { "REG-N": "CK-QN" } } };
+      const c = await mountWith(mount, data);
+      await chooseBase(c, "r202", "r201");
+      await editSame(c, "r202", "g201", { value: "同一でない" });
+      asserts.checkTrue("実績ありなら要再確認を出さない", !hasRecheck(c, "r202", "g201"));
+      asserts.check("記録上のフラグは残る", findSame(await snapshotAll(c), "r202", "g201").needsRecheck, true);
+      const td = () => cellAt(c, ROW.g201, COL.r202);
+      td().querySelector('button[title="同一性を編集"]').click();
+      await sleep(10);
+      asserts.checkTrue("編集欄にも要再確認は出ない", !td().textContent.includes("要再確認"));
+      await clickByText(td(), /キャンセル/);
+      await openTab(c, "認可書実績");
+      const inp = [...c.querySelectorAll('input[placeholder="認可書番号"]')].find((i) => i.value === "CK-QN");
+      setNativeValue(inp, "");
+      await sleep(20);
+      await openTab(c, "帳票");
+      asserts.checkTrue("実績を消すと要再確認が出る", hasRecheck(c, "r202", "g201"));
+      await chooseBase(c, "r203", "r204");
+      await editSame(c, "r203", "g201", { value: "同一でない" });
+      asserts.checkTrue("実績なしのセル（DEMO-Q×REG-Nは実績を消した）は出しっぱなし", hasRecheck(c, "r203", "g201"));
     },
   },
   {
