@@ -14,12 +14,14 @@ Notionバックログ F-04（完成条件 A1〜A8）を単体HTML版に実装し
 - 保存：JSON／データ入りHTMLに `bases`・`sameness` を常に書く。無い旧ファイルは未選択・未確認として読める。壊れた値は全体を拒否（現データ不変）。API版はこれらを含むJSONを置換前に拒否する。
 - F-04a試作（つながり表示・`links`）は撤去方針に従い、このブランチには入れていない。試作は `git stash` に退避済み（`stash@{0}`: "F-04a prototype (rejected 2026-09-19)"。削除はしていない）。
 - 完成条件の確認状況（すべてヘッドレスChromeの自動操作。人手の目視・操作は未実施）：
-  A1〜A8 確認済み（`verify/regs-data.html` のケース A1〜A8・R・U）。画面の見た目はブラウザペインでデモデータを表示して確認。
+  A1〜A8 確認済み（`verify/regs-data.html` のケース A1〜A8・R・C1〜C3・U）。画面の見た目はブラウザペインでデモデータを表示して確認。
 - 検証結果（実行済み。Vite単体＋ヘッドレスChrome、127.0.0.1のみ。`npm run dev`・実API・実DBは不使用）：
-  `regs-data` 12/0（新規）／`decisions` 26/0／`filter` 26/0／`standalone-import` 21/0／`save-guard` 15/0・SKIP 1（既知）／
+  `regs-data` 15/0（新規）／`decisions` 26/0／`filter` 26/0／`standalone-import` 21/0／`save-guard` 15/0・SKIP 1（既知）／
   `decisions-file-roundtrip.mjs` 179/0（実ファイル往復に bases/sameness を追加）／`standalone-csp.mjs` 29/0。`npm run build`・`build:standalone` 成功。
-  生成物 `dist-standalone/ilist-standalone.html` 513,280 bytes、SHA-256 `8c0bbf55b63164b63739be67fa33c0cfb67766a8bda75fa82cba9931ae5e78b8`。
-- レビュー1回（Claudeの /code-review。Codexの独立レビューは未実施）→指摘2件（同一性の入力途中が列フィルターで消える／判断と同一性の編集が同じセルで同時に開く）を修正1回で対応。
+  生成物 `dist-standalone/ilist-standalone.html` 514,941 bytes、SHA-256 `cfdcfaefe64c5290fb411543c01f4f7495577ad0cf0805447402e79914580a36`。
+- レビュー：Claudeの /code-review→指摘2件（同一性の入力途中が列フィルターで消える／判断と同一性の編集が同時に開く）を修正。
+  続いてCodexの読み取りレビュー（`codex exec -s read-only`、codex-cli 0.154.0）→指摘3件をユーザー承認のうえ修正（C1〜C3）：
+  削除した比較元のキーが開き直し後に再発行され古い回答が効く（高）／比較元を外すと要再確認が見えない（中）／LO≥継続車日のセルで比較元変更後に答え直せない（中）。
 - デモ：`verify/f04-demo.json` を単体版の「JSONを読み込み」で開くと、PJ-1で同一（継続車日）、PJ-2で同一でない（新型車日・期限超過・要再確認）の例が見られる。
 
 ## repo／単体HTMLの目的
@@ -31,7 +33,7 @@ Notionバックログ F-04（完成条件 A1〜A8）を単体HTML版に実装し
 ## 現在のbranch・repo
 - repo: `/Users/inouesho/i-list/i-list`
 - branch: `feat/f-04-regs-data`（`chore/bootstrap` の `2591675` から作成。未push）
-- 今回のcommit：`a2541c7`（F-04 実装）→ `7ab37d8`（レビュー指摘の修正）→ 本ファイル更新。pushは未実行（承認待ち）。
+- 今回のcommit：`a2541c7`（F-04 実装）→ `7ab37d8`（/code-review 指摘の修正）→ `466151c`（本ファイル）→ Codex指摘の修正 → 本ファイル更新。pushは未実行（承認待ち）。
 - 最新のpush済み機能commit：`d62d939719975996d54689e6095811ca7d76c640`。実際のHEAD・リモートとの差は `git log`／`git status` で都度確認すること。
 
 ## push済み主要commit
@@ -60,13 +62,14 @@ Notionバックログ F-04（完成条件 A1〜A8）を単体HTML版に実装し
 
 ## 次の一手
 1. 祥が F-04 を画面で確認し、下の判断事項に答える。push（`origin/feat/f-04-regs-data`）は明示承認後に行う。
-2. 確定実装として残すなら Codex の読み取りレビューを受ける。その後 F-10（危ないラン一覧）・F-11（時間軸ビュー）の完成条件を定義する。
+2. Codexレビュー済み（指摘3件は修正済み・修正後の再レビューは未実施）。次は F-10（危ないラン一覧）・F-11（時間軸ビュー）の完成条件を定義する。
 3. 詳細な経緯が必要な場合のみ [docs/current-task-history-2026-09.md](current-task-history-2026-09.md) と [docs/handoff.md](handoff.md) を参照する。
 
 ## 残る判断事項
 - **比較元を選ぶ単位**：今は型式ランごとに選ぶ（次のプロジェクトの同じ型式にも改めて選ぶ）。前のプロジェクトの比較元・同一性を自動で引き継ぐ方式（「1つ前のセル」への依存）は入れていない。引き継ぐなら別途定義が要る。
 - **最初の回答も要再確認になる**：未確認→同一でない と答えると、その場で要再確認が立ち、「答え直して確定」を押すまで残る（A5を文字どおり適用）。1回の操作で済ませたい場合は変更が要る。
 - **LO ≥ 継続車日のセル**は要再確認を立てない（F-04の「やらないこと」をこう解釈した）。
+- **比較元を外したままのセルの要再確認は消せない**：答え直すには比較元が要るため、比較元を選び直して答え直すまで残る。比較元を意図的に外す運用があるなら、消し方を決める必要がある。
 - **人の適用判断（対象／対象外）との連動なし**：同一性が変わって適用日が変わっても、判断の要再確認は立たない。
 - 既存の「要再確認」解除条件（判断側）の仕様と実装の差は判断待ちのまま。
 
