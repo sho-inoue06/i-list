@@ -499,6 +499,35 @@ const SCENARIOS = [
     },
   },
   {
+    id: "R-editor-draft",
+    name: "同一性の入力途中は表示フィルターで列が隠れても残り、セル内の編集領域は1つだけ開く",
+    expect: "未保存の選択・メモが列の再表示後も残る（保存データは変わらない）。判断の編集を開くと同一性の編集は閉じ、その逆も同じ",
+    async run({ mount, asserts }) {
+      const c = await mountWith(mount);
+      await chooseBase(c, "r202", "r201");
+      const td = () => cellAt(c, ROW.g201, COL.r202);
+      td().querySelector('button[title="同一性を編集"]').click();
+      await sleep(10);
+      td().querySelectorAll('input[type="radio"]')[SAMENESS_VALUES.indexOf("同一でない")].click();
+      setNativeValue(td().querySelector("textarea"), "入力途中のメモ（ダミー）");
+      await sleep(10);
+      await clickByText(c, /^PJ-2$/);                  // PJ-1 の列を隠す
+      asserts.check("PJ-1 の列が隠れている", c.querySelector("table thead").textContent.includes("PJ-1"), false);
+      await clickByText(c, /すべて表示/);
+      const ta = td().querySelector("textarea");
+      asserts.check("メモが残る", ta?.value, "入力途中のメモ（ダミー）");
+      asserts.check("選択が残る", td().querySelectorAll('input[type="radio"]')[SAMENESS_VALUES.indexOf("同一でない")]?.checked, true);
+      asserts.check("保存データは変わらない", (await snapshotAll(c)).sameness, []);
+      td().querySelector('button[title="適用判断・理由メモを編集"]').click();
+      await sleep(10);
+      asserts.check("判断を開くと同一性の編集は閉じる（入力欄は1つ）", td().querySelectorAll("textarea").length, 1);
+      asserts.checkTrue("開いているのは判断の編集", td().textContent.includes("この判断で確定") || td().textContent.includes("メモを保存"));
+      td().querySelector('button[title="同一性を編集"]').click();
+      await sleep(10);
+      asserts.check("同一性を開くと判断の編集は閉じる", [td().querySelectorAll("textarea").length, td().textContent.includes("比較元 DEMO-P と当該装置")], [1, true]);
+    },
+  },
+  {
     id: "U-pure-functions",
     name: "候補・比較元の状態・同一性の掃き出し（純関数）",
     expect: "候補はLO順・同PJ別型式のみ。比較元のPJ変更で無効化され判定に使わない。掃き出しは変化なしなら同じ参照を返す",

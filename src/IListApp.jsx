@@ -1284,8 +1284,11 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
   // dataGen は「読込が成功したとき」だけ進む。不正ファイル・置換キャンセル・
   // 古い読込の破棄では進めないので、編集途中の入力は保たれる。
   // 同一性（F-04）の編集中セル。判断の編集とは別に持つ。
+  // 判断と同じく、未保存の下書きは MatrixView 側に持つ（表示フィルターで列が隠れても残す）。
+  // セル内で開く編集領域は常に1つ（判断を開けば同一性は閉じ、その逆も同じ）。
   const [editingSame, setEditingSame] = useState(null); // { runKey, rid } | null
-  useEffect(() => { setEditing(null); setEditDraft(null); setEditingSame(null); }, [dataGen]);
+  const [sameDraft, setSameDraft] = useState(null);     // { runKey, rid, value, reason } | null
+  useEffect(() => { setEditing(null); setEditDraft(null); setEditingSame(null); setSameDraft(null); }, [dataGen]);
 
   // ── 列（型式ラン）表示フィルター ──
   // columnFilter は単体版だけが渡す。選択状態は単体版（StandaloneApp）が保持し、
@@ -1402,14 +1405,16 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                         <span style={{ fontSize:9, color:"#ffb3a8" }}>{c.dueDate<TODAY?"既発効・即対応":`${fmt(c.dueDate)}までに`}</span></>}
                       {showSame && !isEditingSame &&
                         <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c}
-                          onOpen={base.state==="ok" ? ()=>setEditingSame({ runKey:run.key, rid:r.rid }) : null} />}
+                          onOpen={base.state==="ok" ? ()=>{ setEditing(null); setEditDraft(null); setEditingSame({ runKey:run.key, rid:r.rid }); setSameDraft(null); } : null} />}
                       {isEditingSame &&
                         <SamenessEditor rec={sameRec} run={run} reg={r} base={base}
-                          onCancel={()=>setEditingSame(null)}
-                          onSave={(rec)=>{ onSaveSameness(rec); setEditingSame(null); }} />}
+                          draft={sameDraft && sameDraft.runKey===run.key && sameDraft.rid===r.rid ? sameDraft : null}
+                          onDraftChange={(d)=>setSameDraft({ runKey:run.key, rid:r.rid, ...d })}
+                          onCancel={()=>{ setEditingSame(null); setSameDraft(null); }}
+                          onSave={(rec)=>{ onSaveSameness(rec); setEditingSame(null); setSameDraft(null); }} />}
                       {judge && !isEditing &&
                         <DecisionLine dec={dec} run={run} reg={r} regs={regs}
-                          onOpen={()=>{ setEditing({ runKey:run.key, rid:r.rid }); setEditDraft(null); }} />}
+                          onOpen={()=>{ setEditingSame(null); setSameDraft(null); setEditing({ runKey:run.key, rid:r.rid }); setEditDraft(null); }} />}
                       {isEditing &&
                         <DecisionEditor run={run} reg={r} regs={regs} dec={dec} auto={c} notice={notice}
                           draft={editDraft && editDraft.runKey===run.key && editDraft.rid===r.rid ? editDraft : null}
@@ -1552,10 +1557,12 @@ function SamenessLine({ rec, run, reg, base, auto, onOpen }) {
 }
 
 // セルから開く同一性の編集領域。
-function SamenessEditor({ rec, run, reg, base, onSave, onCancel }) {
+function SamenessEditor({ rec, run, reg, base, onSave, onCancel, draft, onDraftChange }) {
   const stored = rec?.value || "未確認";
-  const [value, setValue] = useState(stored);
-  const [reason, setReason] = useState(rec?.reason || "");
+  const [value, _setValue] = useState(draft?.value ?? stored);
+  const [reason, _setReason] = useState(draft?.reason ?? (rec?.reason || ""));
+  const setValue = (v) => { _setValue(v); onDraftChange?.({ value: v, reason }); };
+  const setReason = (v) => { _setReason(v); onDraftChange?.({ value, reason: v }); };
   const live = samenessRecheckReasons(rec, run, reg, base);
   const recheck = !!rec?.needsRecheck || live.length > 0;
   const same = value === stored;
