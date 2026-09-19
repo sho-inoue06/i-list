@@ -830,6 +830,17 @@ export function parseImportedData(d) {
     }
     if (k.numbered && k.value !== null && k.value > maxId) maxId = k.value;
   }
+  // 同一性の「回答した時の比較元」（baseRunKey）は、比較元のランを削除した後も残るスナップショット。
+  // この値を採番の底上げに含めないと、開き直した後に同じキーのランが再発行され、
+  // 答え直していない過去の回答が新しいランを比較元にした途端に有効になってしまう。
+  for (const s of sameness) {
+    if (s.baseRunKey === "") continue;
+    const k = keyNumberOf(s.baseRunKey, "r");
+    if (!isUsableKeyNumber(k)) {
+      return err(`sameness の比較元 "${s.baseRunKey}" は採番できる範囲を超えています。`);
+    }
+    if (k.numbered && k.value !== null && k.value > maxId) maxId = k.value;
+  }
 
   // 反映用のデータをここで作り終える（置換は呼び出し側が一度に行う）。
   // rid を持たない旧形式のJSONには rid を補う。既存の値は削除・統合・改名せず、付け足すだけ。
@@ -1387,8 +1398,10 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                   const isEditing = judge && editing && editing.runKey===run.key && editing.rid===r.rid;
                   // 同一性（F-04）：比較元を選んだランの列だけに印を出す
                   const base = sameCtx ? sameCtx.base(run) : null;
-                  const showSame = !!base && base.state!=="none";
-                  const sameRec = showSame ? sameCtx.rec(run, r) : null;
+                  // 比較元が未選択でも、回答や要再確認が残っているセルには出す（警告を隠さない）
+                  const sameRec = sameCtx ? sameCtx.rec(run, r) : null;
+                  const showSame = !!base && (base.state!=="none" ||
+                    (!!sameRec && (sameRec.needsRecheck || sameRec.value!=="未確認")));
                   const isEditingSame = showSame && editingSame && editingSame.runKey===run.key && editingSame.rid===r.rid;
                   return (
                   <td key={run.key} style={{ padding:0 }}>
@@ -1547,7 +1560,9 @@ function SamenessLine({ rec, run, reg, base, auto, onOpen }) {
         )}
       </div>
       <span style={{ fontSize:9, color:"#8fa3b8", lineHeight:1.5 }}>
-        {base.state === "invalid" ? "比較元が無効のため新継どおり" : appliedText(auto, eff)}
+        {base.state === "invalid" ? "比較元が無効のため新継どおり"
+          : base.state === "none" ? "比較元が未選択のため新継どおり（比較元を選び直して答え直すと要再確認が消えます）"
+          : appliedText(auto, eff)}
         {auto.required && auto.applied && auto.dueDate ? ` ${fmt(auto.dueDate)}` : ""}
         {overdue && <b style={{ color:RED }}> 期限超過</b>}
         {stale && <span style={{ color:AMBER }}>（前の比較元への回答）</span>}
@@ -1566,6 +1581,8 @@ function SamenessEditor({ rec, run, reg, base, onSave, onCancel, draft, onDraftC
   const live = samenessRecheckReasons(rec, run, reg, base);
   const recheck = !!rec?.needsRecheck || live.length > 0;
   const same = value === stored;
+  // 回答した時の比較元といまの比較元が違う回答（要再確認を立てないセルでも起こる）
+  const stale = !!rec && rec.value !== "未確認" && base?.state === "ok" && rec.baseRunKey !== base.baseRunKey;
   const save = () => onSave(nextSamenessRecord({ rec, run, reg, base, value, reason }));
   const reconfirm = () => onSave(nextSamenessRecord({ rec, run, reg, base, value, reason, action: "reconfirm" }));
   return (
@@ -1586,6 +1603,9 @@ function SamenessEditor({ rec, run, reg, base, onSave, onCancel, draft, onDraftC
       <textarea value={reason} onChange={(e)=>setReason(e.target.value)}
         placeholder="理由・メモ（そのまま文字として保存されます）" rows={2}
         style={{ background:"#0c1623", border:`1px solid ${LINE}`, borderRadius:6, color:"#cdd9e5", fontSize:10.5, padding:"5px 6px", width:"100%", boxSizing:"border-box", resize:"vertical", fontFamily:"inherit" }} />
+      {stale && !recheck && (
+        <div style={{ fontSize:9, color:AMBER, lineHeight:1.6 }}>前の比較元への回答です。いまの比較元で答え直して確定すると判定に使われます。</div>
+      )}
       {recheck && (
         <div style={{ fontSize:9, color:AMBER, lineHeight:1.6 }}>
           ⚠ 要再確認{live.length>0 && <>：{live.join("／")}</>}
@@ -1595,7 +1615,7 @@ function SamenessEditor({ rec, run, reg, base, onSave, onCancel, draft, onDraftC
       {rec?.decidedAt && <div style={{ fontSize:9, color:MUTE }}>確定：{rec.decidedAt}</div>}
       <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
         <button onClick={save} style={miniBtn}>{same ? "メモを保存" : value==="未確認" ? "未確認に戻す" : "この回答で確定"}</button>
-        {recheck && same && value!=="未確認" &&
+        {(recheck || stale) && same && value!=="未確認" &&
           <button onClick={reconfirm} style={{ ...miniBtn, borderColor:AMBER, color:AMBER }}>答え直して確定</button>}
         <button onClick={onCancel} style={miniBtn}>キャンセル</button>
       </div>

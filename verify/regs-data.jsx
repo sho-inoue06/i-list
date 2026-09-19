@@ -528,6 +528,72 @@ const SCENARIOS = [
     },
   },
   {
+    id: "C1-deleted-base-key-not-reused",
+    name: "削除した比較元のキーが、開き直した後の新しいランに再発行されない（Codex指摘1）",
+    expect: "回答時の比較元 r900 が残るJSONを読むと、次に追加するランは r901 以降。範囲外の比較元キーは拒否",
+    async run({ mount, asserts }) {
+      const data = {
+        ...clone(DUMMY),
+        sameness: [{ runKey: "r202", rid: "g201", value: "同一", reason: "", decidedAt: STAMP, needsRecheck: true, baseRunKey: "r900" }],
+      };
+      const parsed = parseImportedData(clone(data));
+      asserts.check("採番の底上げに比較元キーを含む", parsed.maxId, 900);
+      const c = await mountWith(mount, data);
+      await openTab(c, "型式ラン");
+      await clickByText(c, /ランを追加/);
+      const snap = await snapshotAll(c);
+      const added = snap.runs[snap.runs.length - 1].key;
+      asserts.check("新しいランは r900 ではない", added === "r900", false);
+      asserts.checkTrue("新しいランは r900 より大きい番号", Number(added.slice(1)) > 900);
+      const huge = { ...clone(data), sameness: [{ ...data.sameness[0], baseRunKey: "r9007199254740993" }] };
+      asserts.check("範囲外の比較元キーは拒否", parseImportedData(huge).ok, false);
+      asserts.check("数字でない比較元キーは採番に影響しない", parseImportedData({ ...clone(data), sameness: [{ ...data.sameness[0], baseRunKey: "run-x" }] }).maxId, 205);
+    },
+  },
+  {
+    id: "C2-recheck-visible-without-base",
+    name: "比較元を外しても、要再確認の残るセルには警告が見える（Codex指摘2）",
+    expect: "同一でないを確定→比較元を未選択に戻すと、セルに『要再確認』と『比較元が未選択』が出る。回答の無いセルには出ない",
+    async run({ mount, asserts }) {
+      const c = await mountWith(mount);
+      await chooseBase(c, "r202", "r201");
+      await editSame(c, "r202", "g201", { value: "同一でない" });
+      await editSame(c, "r202", "g201", { action: "答え直して確定" });
+      asserts.checkTrue("確定直後は要再確認なし", !hasRecheck(c, "r202", "g201"));
+      await chooseBase(c, "r202", "");
+      const t = cellText(c, "r202", "g201");
+      asserts.checkTrue("比較元を外すと要再確認が見える", t.includes("要再確認"));
+      asserts.checkTrue("比較元が未選択と分かる", t.includes("比較元が未選択"));
+      asserts.checkTrue("編集ボタンは出さない（比較元が無いので答えられない）", !cellAt(c, ROW.g201, COL.r202).querySelector('button[title="同一性を編集"]'));
+      asserts.checkTrue("回答の無いセルには同一性行を出さない", !cellText(c, "r202", "g202").includes("同一性"));
+      asserts.checkTrue("見出しには比較元を出さない", !headText(c, "r202").includes("比較元"));
+    },
+  },
+  {
+    id: "C3-reconfirm-after-base-change-no-recheck-cell",
+    name: "LO≥継続車日のセルでも、比較元を変えた後に同じ回答をいまの比較元で確定し直せる（Codex指摘3）",
+    expect: "比較元Aに同一でない→比較元Bへ変更→同じ回答で『答え直して確定』が出て、押すと比較元Bで確定・新型車日を適用",
+    async run({ mount, asserts }) {
+      const data = { ...clone(DUMMY), runs: [...clone(DUMMY.runs), { key: "r206", typeId: "DEMO-S", gen: "PJ-1", sk: "新", lo: "2021-02-01", drop: "2022-12-31" }] };
+      const c = await mountWith(mount, data);
+      await chooseBase(c, "r202", "r201");
+      await editSame(c, "r202", "g202", { value: "同一でない" });
+      asserts.checkTrue("このセルは要再確認を立てない", !hasRecheck(c, "r202", "g202"));
+      await chooseBase(c, "r202", "r206");
+      asserts.checkTrue("比較元変更後は前の回答を使わない（新継どおり）", cellText(c, "r202", "g202").includes("新継どおり"));
+      const td = () => cellAt(c, ROW.g202, COL.r202);
+      td().querySelector('button[title="同一性を編集"]').click();
+      await sleep(10);
+      asserts.checkTrue("前の比較元への回答と案内が出る", td().textContent.includes("前の比較元への回答です"));
+      asserts.checkTrue("答え直して確定が出る", [...td().querySelectorAll("button")].some((b) => b.textContent.includes("答え直して確定")));
+      await clickByText(td(), /キャンセル/);
+      await editSame(c, "r202", "g202", { action: "答え直して確定" });
+      const snap = await snapshotAll(c);
+      asserts.check("いまの比較元で確定", [findSame(snap, "r202", "g202").value, findSame(snap, "r202", "g202").baseRunKey], ["同一でない", "r206"]);
+      asserts.checkTrue("新型車日を適用に戻る", cellText(c, "r202", "g202").includes("新型車日を適用"));
+    },
+  },
+  {
     id: "U-pure-functions",
     name: "候補・比較元の状態・同一性の掃き出し（純関数）",
     expect: "候補はLO順・同PJ別型式のみ。比較元のPJ変更で無効化され判定に使わない。掃き出しは変化なしなら同じ参照を返す",
