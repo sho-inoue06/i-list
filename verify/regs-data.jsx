@@ -57,7 +57,7 @@ const DUMMY = {
   cert: { "DEMO-P": { "REG-M": "CK-PM" } },
 };
 const clone = (o) => JSON.parse(JSON.stringify(o));
-const COL = { r201: 0, r202: 1, r203: 2, r204: 3, r205: 4 };
+const COL = { r201: 0, r202: 1, r203: 2, r204: 3, r205: 4, r206: 5, r207: 5 };   // r206・r207 は個別ケースで6列目に足すラン
 const ROW = { g201: 0, g202: 1 };
 const STAMP = "2026-09-19 10:20";
 const REASON_TRICKY = "同一性メモ（ダミー）</script><script>window.__PWNED__=1</script><b>太字にならない</b> & \" '";
@@ -591,6 +591,23 @@ const SCENARIOS = [
       const snap = await snapshotAll(c);
       asserts.check("いまの比較元で確定", [findSame(snap, "r202", "g202").value, findSame(snap, "r202", "g202").baseRunKey], ["同一でない", "r206"]);
       asserts.checkTrue("新型車日を適用に戻る", cellText(c, "r202", "g202").includes("新型車日を適用"));
+    },
+  },
+  {
+    id: "C4-label-follows-actual-date",
+    name: "同一でないで継続車日によって要になったセルを「新型車日を適用」と表示しない（Codex再レビュー指摘）",
+    expect: "LO 2020/06・drop 2024/12・新型車日 2021/03・継続車日 2023/10 で同一でない → 要（継続・2023/10）のまま、表示は『新型車の式で判定・継続車日で要 2023/10』",
+    async run({ mount, asserts }) {
+      const data = { ...clone(DUMMY), runs: [...clone(DUMMY.runs), { key: "r207", typeId: "DEMO-T", gen: "PJ-1", sk: "新", lo: "2020-06-01", drop: "2024-12-31" }] };
+      const c = await mountWith(mount, data);
+      const td = () => cellAt(c, ROW.g201, 5).textContent;
+      await chooseBase(c, "r207", "r201");
+      await editSame(c, "r207", "g201", { value: "同一でない" });
+      asserts.checkTrue("判定は要（申請発生・継続）のまま", td().includes("申請発生") && td().includes("継続"));
+      asserts.checkTrue("実際の日付の種類で表示", td().includes("新型車の式で判定・継続車日で要 2023/10"));
+      asserts.checkTrue("『新型車日を適用』とは書かない", !td().includes("新型車日を適用"));
+      const e = evalCellWith({}, data.runs[5], DUMMY.regs[0], "同一でない");
+      asserts.check("判定式の結果", [e.required, e.kind, e.dueDate], [true, "継続", "2023-10-01"]);
     },
   },
   {
