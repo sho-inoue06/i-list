@@ -14,7 +14,7 @@ import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
-  parseImportedData, replaceBootData, readBootData, evalCellWith,
+  SEED, parseImportedData, replaceBootData, readBootData, evalCellWith,
   baseCandidates, baseOf, setBase, samenessMatters, effectiveSameness, sweepSameness,
   nextSamenessRecord, SAMENESS_VALUES,
 } from "../src/IListApp.jsx";
@@ -608,6 +608,30 @@ const SCENARIOS = [
       asserts.checkTrue("『新型車日を適用』とは書かない", !td().includes("新型車日を適用"));
       const e = evalCellWith({}, data.runs[5], DUMMY.regs[0], "同一でない");
       asserts.check("判定式の結果", [e.required, e.kind, e.dueDate], [true, "継続", "2023-10-01"]);
+    },
+  },
+  {
+    id: "S-seed-demo",
+    name: "単体版の初期表示（SEED）が検討用の各ケースを出す",
+    expect: "SEEDは検証を通り、開いた直後は『変更なし』。000Bで型式追加、000Cで同一でない・期限超過、LO≥継続車日、未確認に戻した要再確認、初回回答の要再確認が見える",
+    async run({ mount, asserts }) {
+      const p = parseImportedData(clone(SEED));
+      asserts.check("SEEDはそのまま読込検証を通る", p.ok, true);
+      asserts.check("掃き出しで変わらない", sweepSameness(SEED.sameness, SEED.runs, SEED.regs, SEED.bases) === SEED.sameness, true);
+      asserts.check("プロジェクトコード", [...new Set(SEED.runs.map((r) => r.gen))], ["000A", "000B", "000C", "001A"]);
+      asserts.check("型式追加のあるプロジェクト（複数型式）", ["000B", "000C", "001A"].map((g) => new Set(SEED.runs.filter((r) => r.gen === g).map((r) => r.typeId)).size), [2, 2, 2]);
+      const c = mount(undefined).container;
+      await sleep(80);
+      asserts.checkTrue("開いた直後は変更なし", c.textContent.includes("変更なし（未書き出しの変更はありません）"));
+      const at = (col, row) => cellAt(c, row, col).textContent;
+      // 列：r1..r7 = 0..6、行：A,A2,B,C,D,E = 0..5
+      asserts.checkTrue("r3×B 同一→継続車日で否", at(2, 2).includes("継続車日を適用") && at(2, 2).includes("否"));
+      asserts.checkTrue("r5×B 同一でない→期限超過", at(4, 2).includes("新型車日を適用") && at(4, 2).includes("期限超過"));
+      asserts.checkTrue("r5×D LO≥継続車日：要再確認なし・実績あり", !at(4, 4).includes("要再確認") && at(4, 4).includes("DEMO*D00/00*02"));
+      asserts.checkTrue("r3×D 未確認に戻した：要再確認", at(2, 4).includes("同一性：未確認") && at(2, 4).includes("要再確認"));
+      asserts.checkTrue("r7×E 初回回答：要再確認・継続車日で要", at(6, 5).includes("要再確認") && at(6, 5).includes("新型車の式で判定・継続車日で要"));
+      asserts.checkTrue("r7×C 未確認：新継どおり", at(6, 3).includes("新継どおり"));
+      asserts.checkTrue("比較元の無い列に同一性は出ない", !at(3, 2).includes("同一性"));
     },
   },
   {

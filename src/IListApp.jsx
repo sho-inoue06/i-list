@@ -16,26 +16,53 @@ export const TODAY="2026-06-28";
 
 // ダミーデータ（架空の型式・法規・認可書番号。実車・実データとは無関係）
 export const SEED = {
+  // プロジェクトコードは任意の識別記号（000A・000B…）。世代・前後関係は表さない。
+  //   000A：DEMO-0001 だけ
+  //   000B：DEMO-0001 が続き、途中で DEMO-0002 が追加される（LOが違う）
+  //   000C：両型式が続く。DEMO-0002 は装置変更で比較元と同一でなくなる
+  //   001A：別系統の DEMO-0003、途中で DEMO-0004 が追加される
   runs:[
-    {key:"r1",typeId:"DEMO-0001", gen:"初代",     sk:"新",lo:"2017-07-01",drop:"2019-12-31"},
-    {key:"r2",typeId:"DEMO-0001", gen:"改良MC",   sk:"継",lo:"2020-01-01",drop:"2022-12-31"},
-    {key:"r3",typeId:"DEMO-0001", gen:"改良MC2",  sk:"継",lo:"2023-01-01",drop:"2023-12-31"},
-    {key:"r4",typeId:"DEMO-0002",gen:"ビッグMC", sk:"新",lo:"2024-01-01",drop:"2025-12-31"},
-    {key:"r5",typeId:"DEMO-0003",gen:"FMC2026", sk:"新",lo:"2026-01-01",drop:"2030-12-31"},
+    {key:"r1",typeId:"DEMO-0001",gen:"000A",sk:"新",lo:"2017-07-01",drop:"2019-12-31"},
+    {key:"r2",typeId:"DEMO-0001",gen:"000B",sk:"継",lo:"2020-01-01",drop:"2022-12-31"},
+    {key:"r3",typeId:"DEMO-0002",gen:"000B",sk:"新",lo:"2021-04-01",drop:"2022-12-31"},
+    {key:"r4",typeId:"DEMO-0001",gen:"000C",sk:"継",lo:"2023-01-01",drop:"2025-12-31"},
+    {key:"r5",typeId:"DEMO-0002",gen:"000C",sk:"継",lo:"2023-01-01",drop:"2025-12-31"},
+    {key:"r6",typeId:"DEMO-0003",gen:"001A",sk:"新",lo:"2026-01-01",drop:"2030-12-31"},
+    {key:"r7",typeId:"DEMO-0004",gen:"001A",sk:"新",lo:"2027-01-01",drop:"2030-12-31"},
   ],
   regs:[
     {rid:"g1", id:"DEMO-REG-A",   label:"ダミー法規A",   shin:"2016-01-01",kei:"2018-01-01",parent:""},
     {rid:"g2", id:"DEMO-REG-A2",  label:"ダミー法規A SU",shin:"2024-06-01",kei:"2026-06-01",parent:"DEMO-REG-A"},
-    {rid:"g3", id:"DEMO-REG-B",   label:"ダミー法規B",   shin:"2022-01-01",kei:"2024-01-01",parent:""},
+    {rid:"g3", id:"DEMO-REG-B",   label:"ダミー法規B（過渡規定の例）",shin:"2021-03-01",kei:"2023-10-01",parent:""},
     {rid:"g4", id:"DEMO-REG-C",   label:"ダミー法規C",   shin:"2025-01-01",kei:"2027-01-01",parent:""},
     {rid:"g5", id:"DEMO-REG-D",   label:"ダミー法規D",   shin:"2020-01-01",kei:"2022-01-01",parent:""},
     {rid:"g6", id:"DEMO-REG-E",   label:"ダミー法規E",   shin:"2028-01-01",kei:"2029-01-01",parent:""},
   ],
   cert:{
-    "DEMO-0001": {"DEMO-REG-A":"DEMO*A00/00*01","DEMO-REG-D":"DEMO*D00/00*01"},
-    "DEMO-0002": {"DEMO-REG-A":"DEMO*A00/00*02","DEMO-REG-B":"DEMO*B00/00*01","DEMO-REG-D":"DEMO*D00/00*02"},
+    "DEMO-0001": {"DEMO-REG-A":"DEMO*A00/00*01","DEMO-REG-B":"DEMO*B00/00*01","DEMO-REG-D":"DEMO*D00/00*01"},
+    "DEMO-0002": {"DEMO-REG-A":"DEMO*A00/00*02","DEMO-REG-D":"DEMO*D00/00*02"},
     "DEMO-0003": {"DEMO-REG-A":"DEMO*A00/00*03","DEMO-REG-A2":"DEMO*A02/00*01","DEMO-REG-B":"DEMO*B00/00*02","DEMO-REG-D":"DEMO*D00/00*03","DEMO-REG-C":"DEMO*C00/00*01"},
+    "DEMO-0004": {"DEMO-REG-A":"DEMO*A00/00*04","DEMO-REG-A2":"DEMO*A02/00*02","DEMO-REG-D":"DEMO*D00/00*04"},
   },
+  // 比較元・同一性（F-04）の例。単体版の初期表示だけが使う（API版はこの2つを持たない）。
+  //   r3×B 同一       … 継続車日を借りて「否」（新継どおりなら新型車日で既発効）
+  //   r5×B 同一でない … 000Cで装置変更。新型車日（過去）で申請発生・期限超過
+  //   r5×D 同一でない … LO≥継続車日なので結論は変わらず、要再確認も立たない（実績ありで緑）
+  //   r3×D 未確認     … 同一から未確認へ戻した例。要再確認が残っている
+  //   r7×E 同一でない … 初回回答で要再確認が立った例。新型車の式だが継続車日で要になる
+  //   r7×C 未確認     … 手を付けていない例（同一と答えると期日が変わる）
+  bases:[
+    {runKey:"r3",baseRunKey:"r2",decidedAt:"2026-09-19 10:00"},
+    {runKey:"r5",baseRunKey:"r4",decidedAt:"2026-09-19 10:00"},
+    {runKey:"r7",baseRunKey:"r6",decidedAt:"2026-09-19 10:00"},
+  ],
+  sameness:[
+    {runKey:"r3",rid:"g3",value:"同一",reason:"ダミー：比較元と装置は同じ",decidedAt:"2026-09-19 10:05",needsRecheck:false,baseRunKey:"r2"},
+    {runKey:"r5",rid:"g3",value:"同一でない",reason:"ダミー：000Cで装置を変更",decidedAt:"2026-09-19 10:06",needsRecheck:false,baseRunKey:"r4"},
+    {runKey:"r5",rid:"g5",value:"同一でない",reason:"ダミー：LO≥継続車日なので結論は変わらない",decidedAt:"2026-09-19 10:07",needsRecheck:false,baseRunKey:"r4"},
+    {runKey:"r3",rid:"g5",value:"未確認",reason:"ダミー：確認し直すため未確認に戻した",decidedAt:"",needsRecheck:true,baseRunKey:""},
+    {runKey:"r7",rid:"g6",value:"同一でない",reason:"ダミー：初回の回答",decidedAt:"2026-09-19 10:08",needsRecheck:true,baseRunKey:"r6"},
+  ],
 };
 
 // サーバ応答が期待するデータ形 { runs:[], regs:[], cert:{} } かを判定する。
@@ -1828,7 +1855,7 @@ export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun, bases
                 <span style={{ width:8,height:8,borderRadius:2,background:colorOf(r.typeId) }}/>
                 <input value={r.typeId} placeholder="DEMO-0001" onChange={e=>up(r.key,"typeId",e.target.value)} style={{...inp, fontFamily:"ui-monospace,monospace", width:120}}/>
               </div></td>
-              <td style={td}><input value={r.gen} placeholder="FMC2026" onChange={e=>up(r.key,"gen",e.target.value)} style={inp}/></td>
+              <td style={td}><input value={r.gen} placeholder="000A" onChange={e=>up(r.key,"gen",e.target.value)} style={inp}/></td>
               <td style={td}><select value={r.sk} onChange={e=>up(r.key,"sk",e.target.value)} style={{...inp, width:64}}><option value="新">新型</option><option value="継">継続</option></select></td>
               <td style={td}><input type="date" value={r.lo} onChange={e=>up(r.key,"lo",e.target.value)} style={{...inp, fontFamily:"ui-monospace,monospace"}}/></td>
               <td style={td}><input type="date" value={r.drop} onChange={e=>up(r.key,"drop",e.target.value)} style={{...inp, fontFamily:"ui-monospace,monospace"}}/></td>

@@ -96,10 +96,10 @@ export default function StandaloneApp({ bootData } = {}) {
   const [selTypes, setSelTypes] = useState([]);
   const clearColumnFilter = () => { setSelProjects([]); setSelTypes([]); };
 
-  // 規制再判定のデータ（F-04）：比較元（bases）と同一性（sameness）。SEEDには含めない（全ラン未選択）。
+  // 規制再判定のデータ（F-04）：比較元（bases）と同一性（sameness）。初期表示は SEED の例を使う。
   // ※ 検証ハーネスが既存Hookの順序を観測しているため、既存のstateより後ろに置く。
-  const [bases, _setBases] = useState(bootOk ? bootData.data.bases : []);
-  const [sameness, _setSameness] = useState(bootOk ? bootData.data.sameness : []);
+  const [bases, _setBases] = useState(bootOk ? bootData.data.bases : SEED.bases);
+  const [sameness, _setSameness] = useState(bootOk ? bootData.data.sameness : SEED.sameness);
 
   // データ変更を受け付けた時点で「未書き出し」にする。
   // updater関数もそのまま渡せるよう、副作用はupdaterの外（呼び出し時）で行う。

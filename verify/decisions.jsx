@@ -250,7 +250,7 @@ function selectFile(container, text, name = "d.json") {
 // 型式ラン／法規DBタブの入力欄
 const runTypeInputs = (c) => [...c.querySelectorAll('input[placeholder="DEMO-0001"]')];
 const regIdInputs = (c) => [...c.querySelectorAll('input[placeholder="DEMO-REG-A2"]')];
-const runGenInputs = (c) => [...c.querySelectorAll('input[placeholder="FMC2026"]')];
+const runGenInputs = (c) => [...c.querySelectorAll('input[placeholder="000A"]')];
 const regLabelInputs = (c) => [...c.querySelectorAll('input[placeholder="ダミー法規 SU"]')];
 const dateInputs = (c) => [...c.querySelectorAll('input[type="date"]')];
 function deleteRow(container, index) {

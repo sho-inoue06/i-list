@@ -450,7 +450,7 @@ const SCENARIOS = [
       const c = (await mountWithDummy(mount)).container;
       // 何か編集して dirty にする（型式ランタブでコードを1つ変更）
       await openTab(c, "型式ラン");
-      const genInputs = [...c.querySelectorAll('input[placeholder="FMC2026"]')];
+      const genInputs = [...c.querySelectorAll('input[placeholder="000A"]')];
       setNativeValue(genInputs[3], "PJZ-EDIT");   // r4 のコード
       await sleep(20);
       await openTab(c, "帳票");
@@ -476,7 +476,7 @@ const SCENARIOS = [
       await toggleChip(c, "PJX");
       asserts.check("最初は2列", visibleColCount(c), 2);
       await openTab(c, "型式ラン");
-      const genInputs = [...c.querySelectorAll('input[placeholder="FMC2026"]')];
+      const genInputs = [...c.querySelectorAll('input[placeholder="000A"]')];
       setNativeValue(genInputs[0], "PJW");   // r1
       setNativeValue(genInputs[1], "PJW");   // r2
       await sleep(30);
@@ -609,7 +609,7 @@ const SCENARIOS = [
       const c = (await mountWithDummy(mount)).container;
       // 先に dirty にしておく（置換確認を発火させるため）。タブ切替はエディタを開く前に済ませる。
       await openTab(c, "型式ラン");
-      setNativeValue([...c.querySelectorAll('input[placeholder="FMC2026"]')][3], "PJZ-X");
+      setNativeValue([...c.querySelectorAll('input[placeholder="000A"]')][3], "PJZ-X");
       await sleep(20);
       await openTab(c, "帳票");
       await toggleChip(c, "DEMO-A");
