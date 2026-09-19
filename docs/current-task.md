@@ -14,14 +14,16 @@ Notionバックログ F-04（完成条件 A1〜A8）を単体HTML版に実装し
 - 保存：JSON／データ入りHTMLに `bases`・`sameness` を常に書く。無い旧ファイルは未選択・未確認として読める。壊れた値は全体を拒否（現データ不変）。API版はこれらを含むJSONを置換前に拒否する。
 - F-04a試作（つながり表示・`links`）は撤去方針に従い、このブランチには入れていない。試作は `git stash` に退避済み（`stash@{0}`: "F-04a prototype (rejected 2026-09-19)"。削除はしていない）。
 - 完成条件の確認状況（すべてヘッドレスChromeの自動操作。人手の目視・操作は未実施）：
-  A1〜A8 確認済み（`verify/regs-data.html` のケース A1〜A8・R・C1〜C3・U）。画面の見た目はブラウザペインでデモデータを表示して確認。
+  A1〜A8 確認済み（`verify/regs-data.html` のケース A1〜A8・R・C1〜C4・U）。画面の見た目はブラウザペインでデモデータを表示して確認。
 - 検証結果（実行済み。Vite単体＋ヘッドレスChrome、127.0.0.1のみ。`npm run dev`・実API・実DBは不使用）：
-  `regs-data` 15/0（新規）／`decisions` 26/0／`filter` 26/0／`standalone-import` 21/0／`save-guard` 15/0・SKIP 1（既知）／
+  `regs-data` 16/0（新規）／`decisions` 26/0／`filter` 26/0／`standalone-import` 21/0／`save-guard` 15/0・SKIP 1（既知）／
   `decisions-file-roundtrip.mjs` 179/0（実ファイル往復に bases/sameness を追加）／`standalone-csp.mjs` 29/0。`npm run build`・`build:standalone` 成功。
-  生成物 `dist-standalone/ilist-standalone.html` 514,941 bytes、SHA-256 `cfdcfaefe64c5290fb411543c01f4f7495577ad0cf0805447402e79914580a36`。
+  生成物 `dist-standalone/ilist-standalone.html` 515,185 bytes、SHA-256 `fbe1b62c6e4e6f85941d5078b7d4e0df6a6b3732b222fdb88cf84dc1a80bda7c`。
 - レビュー：Claudeの /code-review→指摘2件（同一性の入力途中が列フィルターで消える／判断と同一性の編集が同時に開く）を修正。
   続いてCodexの読み取りレビュー（`codex exec -s read-only`、codex-cli 0.154.0）→指摘3件をユーザー承認のうえ修正（C1〜C3）：
   削除した比較元のキーが開き直し後に再発行され古い回答が効く（高）／比較元を外すと要再確認が見えない（中）／LO≥継続車日のセルで比較元変更後に答え直せない（中）。
+  Codex再レビュー：前回3件の解消を確認。新規2件のうち「同一でないで継続車日によって要になったセルを『新型車日を適用』と表示する」を修正（C4。判定・日付は不変、表示文言のみ）。
+  もう1件「今日が固定値 `TODAY="2026-06-28"` のため、6/28より後の過ぎた期日が既発効・期限超過にならない」は既存設計の問題としてF-04から分離（祥の判断）。構想用レポートを祥へ渡し済み。
 - デモ：`verify/f04-demo.json` を単体版の「JSONを読み込み」で開くと、PJ-1で同一（継続車日）、PJ-2で同一でない（新型車日・期限超過・要再確認）の例が見られる。
 
 ## repo／単体HTMLの目的
@@ -33,7 +35,7 @@ Notionバックログ F-04（完成条件 A1〜A8）を単体HTML版に実装し
 ## 現在のbranch・repo
 - repo: `/Users/inouesho/i-list/i-list`
 - branch: `feat/f-04-regs-data`（`chore/bootstrap` の `2591675` から作成。未push）
-- 今回のcommit：`a2541c7`（F-04 実装）→ `7ab37d8`（/code-review 指摘の修正）→ `466151c`（本ファイル）→ Codex指摘の修正 → 本ファイル更新。pushは未実行（承認待ち）。
+- 今回のcommit：`a2541c7`（F-04 実装）→ `7ab37d8`（/code-review 指摘）→ `466151c`（本ファイル）→ `7b91cd1`（Codex指摘3件）→ `e63cf28`（本ファイル）→ `0c36728`（Codex再レビュー指摘）→ 本ファイル更新。pushは未実行（承認待ち）。
 - 最新のpush済み機能commit：`d62d939719975996d54689e6095811ca7d76c640`。実際のHEAD・リモートとの差は `git log`／`git status` で都度確認すること。
 
 ## push済み主要commit
@@ -62,7 +64,7 @@ Notionバックログ F-04（完成条件 A1〜A8）を単体HTML版に実装し
 
 ## 次の一手
 1. 祥が F-04 を画面で確認し、下の判断事項に答える。push（`origin/feat/f-04-regs-data`）は明示承認後に行う。
-2. Codexレビュー済み（指摘3件は修正済み・修正後の再レビューは未実施）。次は F-10（危ないラン一覧）・F-11（時間軸ビュー）の完成条件を定義する。
+2. Codexレビュー2回済み（1回目3件・2回目1件を修正。最後の修正 `0c36728` 後の再レビューは未実施）。「今日」固定値の問題は祥がNotionで構想中（F-04とは別作業）。次は F-10（危ないラン一覧）・F-11（時間軸ビュー）の完成条件を定義する。
 3. 詳細な経緯が必要な場合のみ [docs/current-task-history-2026-09.md](current-task-history-2026-09.md) と [docs/handoff.md](handoff.md) を参照する。
 
 ## 残る判断事項
