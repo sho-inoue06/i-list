@@ -250,7 +250,7 @@ function selectFile(container, text, name = "d.json") {
 // 型式ラン／法規DBタブの入力欄
 const runTypeInputs = (c) => [...c.querySelectorAll('input[placeholder="DEMO-0001"]')];
 const regIdInputs = (c) => [...c.querySelectorAll('input[placeholder="DEMO-REG-A2"]')];
-const runGenInputs = (c) => [...c.querySelectorAll('input[placeholder="FMC2026"]')];
+const runGenInputs = (c) => [...c.querySelectorAll('input[placeholder="000A"]')];
 const regLabelInputs = (c) => [...c.querySelectorAll('input[placeholder="ダミー法規 SU"]')];
 const dateInputs = (c) => [...c.querySelectorAll('input[type="date"]')];
 function deleteRow(container, index) {
@@ -376,7 +376,8 @@ const SCENARIOS = [
         asserts.check("正常読込はimportedのまま", readStandaloneState(c).saveState, "imported");
       }
       // 保護の観測が全て終わってから初めて書き出す。
-      asserts.check("JSON全項目の値が一致", await snapshotAll(c), expected);
+      // 書き出しには F-04 の比較元・同一性（このケースでは空）も常に入る
+      asserts.check("JSON全項目の値が一致", await snapshotAll(c), { ...expected, bases: [], sameness: [] });
       await sleep(250);
       asserts.check("保存直後にdirtyへ戻らない", readStandaloneState(c).dirtyRef, false);
       asserts.check("保存後の表示", readStatus(c), STATUS_TEXTS[2]);

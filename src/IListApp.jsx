@@ -16,26 +16,53 @@ export const TODAY="2026-06-28";
 
 // ダミーデータ（架空の型式・法規・認可書番号。実車・実データとは無関係）
 export const SEED = {
+  // プロジェクトコードは任意の識別記号（000A・000B…）。世代・前後関係は表さない。
+  //   000A：DEMO-0001 だけ
+  //   000B：DEMO-0001 が続き、途中で DEMO-0002 が追加される（LOが違う）
+  //   000C：両型式が続く。DEMO-0002 は装置変更で比較元と同一でなくなる
+  //   001A：別系統の DEMO-0003、途中で DEMO-0004 が追加される
   runs:[
-    {key:"r1",typeId:"DEMO-0001", gen:"初代",     sk:"新",lo:"2017-07-01",drop:"2019-12-31"},
-    {key:"r2",typeId:"DEMO-0001", gen:"改良MC",   sk:"継",lo:"2020-01-01",drop:"2022-12-31"},
-    {key:"r3",typeId:"DEMO-0001", gen:"改良MC2",  sk:"継",lo:"2023-01-01",drop:"2023-12-31"},
-    {key:"r4",typeId:"DEMO-0002",gen:"ビッグMC", sk:"新",lo:"2024-01-01",drop:"2025-12-31"},
-    {key:"r5",typeId:"DEMO-0003",gen:"FMC2026", sk:"新",lo:"2026-01-01",drop:"2030-12-31"},
+    {key:"r1",typeId:"DEMO-0001",gen:"000A",sk:"新",lo:"2017-07-01",drop:"2019-12-31"},
+    {key:"r2",typeId:"DEMO-0001",gen:"000B",sk:"継",lo:"2020-01-01",drop:"2022-12-31"},
+    {key:"r3",typeId:"DEMO-0002",gen:"000B",sk:"新",lo:"2021-04-01",drop:"2022-12-31"},
+    {key:"r4",typeId:"DEMO-0001",gen:"000C",sk:"継",lo:"2023-01-01",drop:"2025-12-31"},
+    {key:"r5",typeId:"DEMO-0002",gen:"000C",sk:"継",lo:"2023-01-01",drop:"2025-12-31"},
+    {key:"r6",typeId:"DEMO-0003",gen:"001A",sk:"新",lo:"2026-01-01",drop:"2030-12-31"},
+    {key:"r7",typeId:"DEMO-0004",gen:"001A",sk:"新",lo:"2027-01-01",drop:"2030-12-31"},
   ],
   regs:[
     {rid:"g1", id:"DEMO-REG-A",   label:"ダミー法規A",   shin:"2016-01-01",kei:"2018-01-01",parent:""},
     {rid:"g2", id:"DEMO-REG-A2",  label:"ダミー法規A SU",shin:"2024-06-01",kei:"2026-06-01",parent:"DEMO-REG-A"},
-    {rid:"g3", id:"DEMO-REG-B",   label:"ダミー法規B",   shin:"2022-01-01",kei:"2024-01-01",parent:""},
+    {rid:"g3", id:"DEMO-REG-B",   label:"ダミー法規B（過渡規定の例）",shin:"2021-03-01",kei:"2023-10-01",parent:""},
     {rid:"g4", id:"DEMO-REG-C",   label:"ダミー法規C",   shin:"2025-01-01",kei:"2027-01-01",parent:""},
     {rid:"g5", id:"DEMO-REG-D",   label:"ダミー法規D",   shin:"2020-01-01",kei:"2022-01-01",parent:""},
     {rid:"g6", id:"DEMO-REG-E",   label:"ダミー法規E",   shin:"2028-01-01",kei:"2029-01-01",parent:""},
   ],
   cert:{
-    "DEMO-0001": {"DEMO-REG-A":"DEMO*A00/00*01","DEMO-REG-D":"DEMO*D00/00*01"},
-    "DEMO-0002": {"DEMO-REG-A":"DEMO*A00/00*02","DEMO-REG-B":"DEMO*B00/00*01","DEMO-REG-D":"DEMO*D00/00*02"},
+    "DEMO-0001": {"DEMO-REG-A":"DEMO*A00/00*01","DEMO-REG-B":"DEMO*B00/00*01","DEMO-REG-D":"DEMO*D00/00*01"},
+    "DEMO-0002": {"DEMO-REG-A":"DEMO*A00/00*02","DEMO-REG-D":"DEMO*D00/00*02"},
     "DEMO-0003": {"DEMO-REG-A":"DEMO*A00/00*03","DEMO-REG-A2":"DEMO*A02/00*01","DEMO-REG-B":"DEMO*B00/00*02","DEMO-REG-D":"DEMO*D00/00*03","DEMO-REG-C":"DEMO*C00/00*01"},
+    "DEMO-0004": {"DEMO-REG-A":"DEMO*A00/00*04","DEMO-REG-A2":"DEMO*A02/00*02","DEMO-REG-D":"DEMO*D00/00*04"},
   },
+  // 比較元・同一性（F-04）の例。単体版の初期表示だけが使う（API版はこの2つを持たない）。
+  //   r3×B 同一       … 継続車日を借りて「否」（新継どおりなら新型車日で既発効）
+  //   r5×B 同一でない … 000Cで装置変更。新型車日（過去）で申請発生・期限超過
+  //   r5×D 同一でない … LO≥継続車日なので結論は変わらず、要再確認も立たない（実績ありで緑。実績ありのセルは要再確認を出さない）
+  //   r3×C 未確認     … 同一から未確認へ戻した例。実績が無いので要再確認が残っている
+  //   r7×E 同一でない … 初回回答で要再確認が立った例。新型車の式だが継続車日で要になる
+  //   r7×C 未確認     … 手を付けていない例（同一と答えると期日が変わる）
+  bases:[
+    {runKey:"r3",baseRunKey:"r2",decidedAt:"2026-09-19 10:00"},
+    {runKey:"r5",baseRunKey:"r4",decidedAt:"2026-09-19 10:00"},
+    {runKey:"r7",baseRunKey:"r6",decidedAt:"2026-09-19 10:00"},
+  ],
+  sameness:[
+    {runKey:"r3",rid:"g3",value:"同一",reason:"ダミー：比較元と装置は同じ",decidedAt:"2026-09-19 10:05",needsRecheck:false,baseRunKey:"r2"},
+    {runKey:"r5",rid:"g3",value:"同一でない",reason:"ダミー：000Cで装置を変更",decidedAt:"2026-09-19 10:06",needsRecheck:false,baseRunKey:"r4"},
+    {runKey:"r5",rid:"g5",value:"同一でない",reason:"ダミー：LO≥継続車日なので結論は変わらない",decidedAt:"2026-09-19 10:07",needsRecheck:false,baseRunKey:"r4"},
+    {runKey:"r3",rid:"g4",value:"未確認",reason:"ダミー：確認し直すため未確認に戻した",decidedAt:"",needsRecheck:true,baseRunKey:""},
+    {runKey:"r7",rid:"g6",value:"同一でない",reason:"ダミー：初回の回答",decidedAt:"2026-09-19 10:08",needsRecheck:true,baseRunKey:"r6"},
+  ],
 };
 
 // サーバ応答が期待するデータ形 { runs:[], regs:[], cert:{} } かを判定する。
@@ -49,8 +76,15 @@ export const isValidData = (d) =>
 // 業務ロジック（判定式）。API版・単体版の両方がここを参照する（二重管理をしないため）。
 // 要否：新型ラン 要⇔(新型適用≤LO)or(継続適用≤ドロップ)、継続ラン 要⇔継続適用≤ドロップ
 // ───────────────────────────────────────────────
-export const evalCellWith = (cert, run, r) => {
-  const { sk, lo, drop } = run;
+//
+// sameness（省略可）… 比較元との同一性（F-04）。省略・null・"未確認" のときは従来どおり run.sk で判定する。
+//   "同一"       … 過渡規定で継続車側の規制日を適用する（継続ランと同じ式で判定）
+//   "同一でない" … 新型車側の規制日を適用する（新型ランと同じ式で判定）
+// 戻り値の applied は、同一性によって適用する側を決めたときだけ "継続車日" / "新型車日" を持つ（それ以外は ""）。
+export const evalCellWith = (cert, run, r, sameness) => {
+  const { lo, drop } = run;
+  const applied = sameness==="同一" ? "継続車日" : sameness==="同一でない" ? "新型車日" : "";
+  const sk = applied==="継続車日" ? "継" : applied==="新型車日" ? "新" : run.sk;
   let required=false, kind="";
   if (sk==="新") {
     if (r.shin && r.shin<=lo) { required=true; kind="新型"; }
@@ -60,7 +94,7 @@ export const evalCellWith = (cert, run, r) => {
   }
   const ck = cert[run.typeId]?.[r.id] || null;
   const status = !required ? "off" : ck ? "ok" : "leak";
-  return { required, kind, ck, status, dueDate: kind==="新型" ? r.shin : r.kei };
+  return { required, kind, ck, status, dueDate: kind==="新型" ? r.shin : r.kei, applied };
 };
 
 // ───────────────────────────────────────────────
@@ -111,12 +145,13 @@ export function approachingNoticeFor(cellStatus, run, r) {
 }
 
 // 帳票の集計（漏れ一覧と実効ドロップ）。判定は evalCellWith を使う。
-export const summarize = (runs, regs, cert) => {
+// samenessFor(run, reg) は省略可（F-04の同一性。省略時は従来どおり）。
+export const summarize = (runs, regs, cert, samenessFor) => {
   const leaks=[], effDrop={};
   for (const run of runs) {
     let earliest=null;
     for (const r of regs) {
-      const c = evalCellWith(cert, run, r);
+      const c = evalCellWith(cert, run, r, samenessFor ? samenessFor(run, r) : undefined);
       if (c.status==="leak") {
         leaks.push({ run, reg:r.id, kind:c.kind, dueDate:c.dueDate });
         if (!earliest || c.dueDate<earliest) earliest=c.dueDate;
@@ -316,6 +351,167 @@ export function markRunNeedsRecheck(decisions, runKey) {
     return { ...d, needsRecheck: true };
   });
   return changed ? next : decisions || [];
+}
+
+// ───────────────────────────────────────────────
+// 規制再判定のデータ（F-04）：比較元（bases）と同一性（sameness）
+//
+// 過渡規定：規制日後の型式指定でも、規制日前に指定を受けた比較元と当該装置の性能が
+// 同一なら継続車側の規制日を適用できる。同一でなくなれば新型車側の規制日へ切り替わる。
+//
+// decisions（人の適用判断）とは別のデータとして持つ。車名・車種名は持たない（会社ルール）。
+//
+// 比較元（bases）… 型式ラン1件につき0〜1件。
+//   { runKey, baseRunKey, decidedAt }
+//   ・候補は「同じプロジェクトコード（run.gen、空は対象外）で、型式が違うラン」。人が1件選んで確定する。
+//   ・レコードが無い＝未選択。選び直すと上書き、「未選択」に戻すとレコードを消す。
+//   ・比較元のランが削除・改名されて候補の条件を外れたら「無効」と表示し、同一性の判定には使わない。
+//
+// 同一性（sameness）… 型式ラン×法規行（runKey × rid）ごと。
+//   { runKey, rid, value, reason, decidedAt, needsRecheck, baseRunKey }
+//     value        … "未確認" / "同一" / "同一でない"（レコードが無い＝未確認）
+//     decidedAt    … 同一／同一でないを確定した端末時刻。未確認は ""
+//     needsRecheck … 要再確認。いちど立つと、同一性を答え直して確定したときにだけ下りる
+//     baseRunKey   … 回答した時点の比較元（スナップショット）。比較元が変わると、その回答は使わない
+// ───────────────────────────────────────────────
+export const SAMENESS_VALUES = ["未確認", "同一", "同一でない"];
+
+// 比較元の候補：同じプロジェクトコード（空でない）・型式が違う・自分以外のラン。LO順に並べる。
+export function baseCandidates(run, runs) {
+  if (!run || run.gen === "") return [];
+  return (runs || [])
+    .filter((x) => x.key !== run.key && x.gen === run.gen && x.typeId !== run.typeId)
+    .slice()
+    .sort((a, b) => (a.lo || "").localeCompare(b.lo || ""));
+}
+
+// 比較元の状態。
+//   none    … 未選択（レコードなし）
+//   ok      … 選択済みで、いまも候補の条件を満たす
+//   invalid … 選択済みだが、比較元が見つからない・候補の条件を外れた（判定には使わない）
+export function baseOf(run, runs, bases) {
+  const rec = (bases || []).find((b) => b.runKey === run?.key) || null;
+  if (!rec) return { state: "none", rec: null, baseRun: null, baseRunKey: "" };
+  const baseRun = (runs || []).find((x) => x.key === rec.baseRunKey) || null;
+  const ok = !!baseRun && baseCandidates(run, runs).some((x) => x.key === baseRun.key);
+  return ok
+    ? { state: "ok", rec, baseRun, baseRunKey: baseRun.key }
+    : { state: "invalid", rec, baseRun, baseRunKey: "" };
+}
+
+// 比較元の選択・変更・解除（"" で未選択に戻す）。
+export function setBase(bases, runKey, baseRunKey, decidedAt = nowStamp()) {
+  const rest = (bases || []).filter((b) => b.runKey !== runKey);
+  return baseRunKey === "" ? rest : [...rest, { runKey, baseRunKey, decidedAt }];
+}
+
+// 同一性の答えで結論が変わらないセルか（やらないこと：LOが継続車日以降のランへの要再確認）。
+// LO・継続車日の両方が正しい日付で、LO ≥ 継続車日なら、同一でも同一でなくても適用が必要になる。
+// 日付が欠けている・不正なときは「変わりうる」側（要再確認を出す側）に倒す。
+export function samenessMatters(run, reg) {
+  const lo = dateDayNumber(run?.lo), kei = dateDayNumber(reg?.kei);
+  return !(lo !== null && kei !== null && lo >= kei);
+}
+
+export function samenessIndex(sameness) {
+  const m = new Map();
+  for (const s of sameness || []) {
+    if (!m.has(s.runKey)) m.set(s.runKey, new Map());
+    m.get(s.runKey).set(s.rid, s);
+  }
+  return m;
+}
+export const findSameness = (index, runKey, rid) => index.get(runKey)?.get(rid) || null;
+
+// 判定に使う同一性。比較元が有効でなければ null（＝同一性を使わない。従来の新継どおり）。
+// 回答した時の比較元といまの比較元が違う回答は使わず、未確認として扱う。
+export function effectiveSameness(rec, base) {
+  if (!base || base.state !== "ok") return null;
+  if (!rec || rec.value === "未確認") return "未確認";
+  return rec.baseRunKey === base.baseRunKey ? rec.value : "未確認";
+}
+
+// いま要再確認であるべき理由（保存済みのフラグとは別に、条件から導く）。
+export function samenessRecheckReasons(rec, run, reg, base) {
+  if (!rec || rec.value === "未確認" || !samenessMatters(run, reg)) return [];
+  if (!base || base.state !== "ok") return ["比較元が未選択または無効です"];
+  if (rec.baseRunKey !== base.baseRunKey) return ["回答した時から比較元が変わりました"];
+  return [];
+}
+
+// 要再確認の掃き出し（立てるだけ。下ろさない）。変化が無ければ同じ配列参照を返す。
+export function sweepSameness(sameness, runs, regs, bases) {
+  const list = sameness || [];
+  const runByKey = new Map((runs || []).map((r) => [r.key, r]));
+  const regByRid = new Map((regs || []).map((r) => [r.rid, r]));
+  let changed = false;
+  const next = list.map((s) => {
+    if (s.needsRecheck) return s;
+    const run = runByKey.get(s.runKey), reg = regByRid.get(s.rid);
+    if (!run || !reg) return s;
+    if (samenessRecheckReasons(s, run, reg, baseOf(run, runs, bases)).length === 0) return s;
+    changed = true;
+    return { ...s, needsRecheck: true };
+  });
+  return changed ? next : list;
+}
+
+// セルの編集から保存する1件を作る。
+//   action="save"      … 選んだ値で保存する。
+//       値が保存済みと同じ … メモだけ保存（確定日時・比較元・要再確認は変えない）
+//       値が変わった       … 同一でない／未確認へ変わったら要再確認を立てる。
+//                            同一へ答え直したときは要再確認を下ろす（答え直して確定した）。
+//   action="reconfirm" … 同一／同一でないを、いまの比較元に対して答え直して確定する（要再確認を下ろす）。
+// 結論が変わらないセル（samenessMatters=false）では要再確認を立てない。
+export function nextSamenessRecord({ rec, run, reg, base, value, reason, action = "save", now = nowStamp() }) {
+  const stored = rec?.value || "未確認";
+  const prevEffective = effectiveSameness(rec, base) || "未確認";
+  const baseRunKey = base?.state === "ok" ? base.baseRunKey : "";
+  const common = { runKey: run.key, rid: reg.rid, reason };
+  if (action === "reconfirm") {
+    return { ...common, value, decidedAt: now, needsRecheck: false, baseRunKey };
+  }
+  if (value === stored) {
+    const b = rec || { value: "未確認", decidedAt: "", needsRecheck: false, baseRunKey: "" };
+    return { ...common, value: b.value, decidedAt: b.decidedAt, needsRecheck: b.needsRecheck, baseRunKey: b.baseRunKey };
+  }
+  const raise = samenessMatters(run, reg) && value !== "同一" && value !== prevEffective;
+  const needsRecheck = raise ? true : value === "同一" ? false : !!rec?.needsRecheck;
+  return value === "未確認"
+    ? { ...common, value, decidedAt: "", needsRecheck, baseRunKey: "" }
+    : { ...common, value, decidedAt: now, needsRecheck, baseRunKey };
+}
+
+export function upsertSameness(sameness, next) {
+  const list = sameness || [];
+  const i = list.findIndex((s) => s.runKey === next.runKey && s.rid === next.rid);
+  if (i === -1) return [...list, next];
+  const out = list.slice();
+  out[i] = next;
+  return out;
+}
+// 情報を持たない同一性（未確認・理由空・要再確認なし）はレコード無しと同じなので書き出さない。
+export const normalizeSameness = (sameness) =>
+  (sameness || []).filter((s) => !(s.value === "未確認" && s.reason.trim() === "" && !s.needsRecheck));
+
+// 行削除時の参照整合。比較元として参照されているランを消したときは、その比較元選択も消す
+// （同一性の回答は残し、掃き出しで要再確認になる）。
+export const pruneBasesByRun = (bases, runKey) =>
+  (bases || []).filter((b) => b.runKey !== runKey && b.baseRunKey !== runKey);
+export const pruneSamenessByRun = (sameness, runKey) => (sameness || []).filter((s) => s.runKey !== runKey);
+export const pruneSamenessByReg = (sameness, rid) => (sameness || []).filter((s) => s.rid !== rid);
+
+// 画面・集計から使うためのまとめ。bases/sameness が変わったときだけ作り直す想定。
+export function makeSamenessContext(runs, bases, sameness) {
+  const idx = samenessIndex(sameness);
+  const baseCache = new Map();
+  const base = (run) => {
+    if (!baseCache.has(run.key)) baseCache.set(run.key, baseOf(run, runs, bases));
+    return baseCache.get(run.key);
+  };
+  const rec = (run, reg) => findSameness(idx, run.key, reg.rid);
+  const effective = (run, reg) => effectiveSameness(rec(run, reg), base(run));
+  return { base, rec, effective };
 }
 
 // 採番の上限。生成できる範囲と読み込める範囲を同じ値にそろえる。
@@ -587,6 +783,63 @@ export function parseImportedData(d) {
     decisions = d.decisions;
   }
 
+  // bases（比較元・F-04）。キーが無い旧形式は「全ラン未選択」。キーがあって壊れていれば全体を拒否する。
+  let bases = [];
+  if (d.bases !== undefined) {
+    if (!Array.isArray(d.bases)) return err("bases が配列ではありません。");
+    const seen = new Set();
+    for (let i = 0; i < d.bases.length; i++) {
+      const b = d.bases[i];
+      if (!b || typeof b !== "object" || Array.isArray(b)) return err(`bases[${i}] が比較元オブジェクトではありません。`);
+      if (!isStr(b.runKey) || b.runKey === "") return err(`bases[${i}].runKey が文字列ではありません。`);
+      if (!isStr(b.baseRunKey) || b.baseRunKey === "") return err(`bases[${i}].baseRunKey が文字列ではありません。`);
+      if (!runKeys.has(b.runKey)) return err(`bases[${i}] が存在しない型式ラン "${b.runKey}" を参照しています。`);
+      if (!runKeys.has(b.baseRunKey)) return err(`bases[${i}] の比較元が存在しない型式ラン "${b.baseRunKey}" です。`);
+      if (b.runKey === b.baseRunKey) return err(`bases[${i}] は自分自身を比較元にしています。`);
+      if (seen.has(b.runKey)) return err(`bases に同じ型式ランの比較元が重複しています（${b.runKey}）。`);
+      seen.add(b.runKey);
+      if (!isValidDecidedAt(b.decidedAt)) return err(`bases[${i}].decidedAt が確定日時の形式（YYYY-MM-DD HH:MM）でないか、実在しない日時です。`);
+    }
+    bases = d.bases;
+  }
+
+  // sameness（同一性・F-04）。キーが無い旧形式は「全件未確認」。
+  // decisions と同じく regs 全行に rid が必要（補番でつなぎ直すと別の法規行へ結び付くため）。
+  let sameness = [];
+  if (d.sameness !== undefined) {
+    if (!Array.isArray(d.sameness)) return err("sameness が配列ではありません。");
+    for (let i = 0; i < d.regs.length; i++) {
+      if (d.regs[i].rid === undefined) {
+        return err(`sameness を含むデータでは regs[${i}].rid が必要です（内部キーを補番して同一性をつなぎ直すことはしません）。`);
+      }
+    }
+    const seenByRun = new Map();
+    for (let i = 0; i < d.sameness.length; i++) {
+      const s = d.sameness[i];
+      if (!s || typeof s !== "object" || Array.isArray(s)) return err(`sameness[${i}] が同一性オブジェクトではありません。`);
+      if (!isStr(s.runKey) || s.runKey === "") return err(`sameness[${i}].runKey が文字列ではありません。`);
+      if (!isStr(s.rid) || s.rid === "") return err(`sameness[${i}].rid が文字列ではありません。`);
+      if (!runKeys.has(s.runKey)) return err(`sameness[${i}] が存在しない型式ラン "${s.runKey}" を参照しています。`);
+      if (!regRids.has(s.rid)) return err(`sameness[${i}] が存在しない法規行 "${s.rid}" を参照しています。`);
+      if (!seenByRun.has(s.runKey)) seenByRun.set(s.runKey, new Set());
+      if (seenByRun.get(s.runKey).has(s.rid)) return err(`sameness に同じ型式ラン×法規行が重複しています（${s.runKey} × ${s.rid}）。`);
+      seenByRun.get(s.runKey).add(s.rid);
+      if (!SAMENESS_VALUES.includes(s.value)) return err(`sameness[${i}].value が「未確認 / 同一 / 同一でない」のいずれかではありません。`);
+      if (!isStr(s.reason)) return err(`sameness[${i}].reason が文字列ではありません。`);
+      if (!isStr(s.decidedAt)) return err(`sameness[${i}].decidedAt が文字列ではありません。`);
+      if (typeof s.needsRecheck !== "boolean") return err(`sameness[${i}].needsRecheck が真偽値ではありません。`);
+      // baseRunKey は回答時点のスナップショット。比較元のランが後で削除されてもよいので、存在までは求めない。
+      if (!isStr(s.baseRunKey)) return err(`sameness[${i}].baseRunKey が文字列ではありません。`);
+      if (s.value === "未確認") {
+        if (s.decidedAt !== "" || s.baseRunKey !== "") return err(`sameness[${i}] は「未確認」ですが確定日時または比較元を持っています。`);
+      } else {
+        if (!isValidDecidedAt(s.decidedAt)) return err(`sameness[${i}].decidedAt が確定日時の形式（YYYY-MM-DD HH:MM）でないか、実在しない日時です。`);
+        if (s.baseRunKey === "") return err(`sameness[${i}] は「${s.value}」ですが、回答した時の比較元がありません。`);
+      }
+    }
+    sameness = d.sameness;
+  }
+
   // 追加行の採番に必要な情報（keyの数値部分）を、置換前にここで確定させておく。
   // 検証に失敗した場合は採番状態を一切変えないため、_id はまだ更新しない。
   //
@@ -604,6 +857,17 @@ export function parseImportedData(d) {
     }
     if (k.numbered && k.value !== null && k.value > maxId) maxId = k.value;
   }
+  // 同一性の「回答した時の比較元」（baseRunKey）は、比較元のランを削除した後も残るスナップショット。
+  // この値を採番の底上げに含めないと、開き直した後に同じキーのランが再発行され、
+  // 答え直していない過去の回答が新しいランを比較元にした途端に有効になってしまう。
+  for (const s of sameness) {
+    if (s.baseRunKey === "") continue;
+    const k = keyNumberOf(s.baseRunKey, "r");
+    if (!isUsableKeyNumber(k)) {
+      return err(`sameness の比較元 "${s.baseRunKey}" は採番できる範囲を超えています。`);
+    }
+    if (k.numbered && k.value !== null && k.value > maxId) maxId = k.value;
+  }
 
   // 反映用のデータをここで作り終える（置換は呼び出し側が一度に行う）。
   // rid を持たない旧形式のJSONには rid を補う。既存の値は削除・統合・改名せず、付け足すだけ。
@@ -616,8 +880,8 @@ export function parseImportedData(d) {
 
   return {
     ok: true,
-    // decisions が無い旧形式は空配列（＝全件未確認）。既存3領域は従来どおりそのまま返す。
-    data: { runs: d.runs, regs: planned.regs, cert: d.cert, decisions },
+    // decisions / bases / sameness が無い旧形式は空配列（＝全件未確認・比較元未選択）。既存3領域は従来どおりそのまま返す。
+    data: { runs: d.runs, regs: planned.regs, cert: d.cert, decisions, bases, sameness },
     maxId,
     maxRid: planned.maxRid,
   };
@@ -904,10 +1168,12 @@ export default function IListApp() {
         //   ・保存Effectが再実行されない＝この読込を原因とするPUTが発生しない
         // ただし、これは *いま動いているこのフロントエンド* の誤投入を止めるだけである。
         // 配布済みの古いビルド、curl等での直接PUT、サーバ側の検証は守れない。
-        if (d && typeof d === "object" && !Array.isArray(d) && d.decisions !== undefined) {
+        // 比較元（bases）・同一性（sameness）も単体版だけのデータなので同じ理由で拒否する。
+        if (d && typeof d === "object" && !Array.isArray(d) &&
+            (d.decisions !== undefined || d.bases !== undefined || d.sameness !== undefined)) {
           alert(
-            "このファイルは単体版（サーバなし）の判断データを含んでいます。\n" +
-            "サーバ保存版は判断データを保存できないため、読み込みを中止しました。\n\n" +
+            "このファイルは単体版（サーバなし）の判断データ（適用判断・比較元・同一性）を含んでいます。\n" +
+            "サーバ保存版はこれらを保存できないため、読み込みを中止しました。\n\n" +
             "（現在のデータは変更していません。単体版のHTMLで開いてください）"
           );
           return;
@@ -1032,7 +1298,8 @@ function ColumnFilterBar({ projectOptions, typeOptions, selProjects, setSelProje
   );
 }
 
-export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, onSaveDecision, onRecheckRun, dataGen, columnFilter }) {
+// sameCtx / onSaveSameness は省略可能（F-04・単体版のみ）。省略時は同一性のUIを一切描画しない。
+export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, onSaveDecision, onRecheckRun, dataGen, columnFilter, sameCtx, onSaveSameness }) {
   // 黄色は status="off"（否）の表示だけを差し替える注記であり、要否判定(status)そのものは変えない。
   // ok（緑）・leak（赤）の判定・配色には一切関与しない（既存の赤警告を黄色で弱めないため）。
   // 人の適用判断もセルの色には一切関与しない（対象外を緑にしない・赤を消さない）。
@@ -1054,7 +1321,12 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
   // 古い理由を新しい判断へ書き戻せてしまう。
   // dataGen は「読込が成功したとき」だけ進む。不正ファイル・置換キャンセル・
   // 古い読込の破棄では進めないので、編集途中の入力は保たれる。
-  useEffect(() => { setEditing(null); setEditDraft(null); }, [dataGen]);
+  // 同一性（F-04）の編集中セル。判断の編集とは別に持つ。
+  // 判断と同じく、未保存の下書きは MatrixView 側に持つ（表示フィルターで列が隠れても残す）。
+  // セル内で開く編集領域は常に1つ（判断を開けば同一性は閉じ、その逆も同じ）。
+  const [editingSame, setEditingSame] = useState(null); // { runKey, rid } | null
+  const [sameDraft, setSameDraft] = useState(null);     // { runKey, rid, value, reason } | null
+  useEffect(() => { setEditing(null); setEditDraft(null); setEditingSame(null); setSameDraft(null); }, [dataGen]);
 
   // ── 列（型式ラン）表示フィルター ──
   // columnFilter は単体版だけが渡す。選択状態は単体版（StandaloneApp）が保持し、
@@ -1122,6 +1394,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                 </div>
                 <div style={{ fontSize:9.5, color:"#6b7d90", margin:"2px 0" }}>{run.gen}・{run.sk==="新"?"新型/指定":"継続/既指定"}</div>
                 <div style={{ fontSize:9, color:MUTE, fontFamily:"ui-monospace,monospace" }}>LO {fmt(run.lo)}<br/>drop {fmt(run.drop)}</div>
+                {sameCtx && <BaseLabel base={sameCtx.base(run)} />}
                 {judge && onRecheckRun && (
                   <button onClick={()=>onRecheckRun(run.key)} style={miniBtn}
                     title="このランの確定した判断（対象／対象外）をまとめて要再確認にします。理由・確定日時は消えません。">
@@ -1150,6 +1423,13 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                   // 人の適用判断（propsが無ければ null のまま＝何も描画しない）
                   const dec = judge ? findDecision(decIndex, run.key, r.rid) : null;
                   const isEditing = judge && editing && editing.runKey===run.key && editing.rid===r.rid;
+                  // 同一性（F-04）：比較元を選んだランの列だけに印を出す
+                  const base = sameCtx ? sameCtx.base(run) : null;
+                  // 比較元が未選択でも、回答や要再確認が残っているセルには出す（警告を隠さない）
+                  const sameRec = sameCtx ? sameCtx.rec(run, r) : null;
+                  const showSame = !!base && (base.state!=="none" ||
+                    (!!sameRec && (sameRec.needsRecheck || sameRec.value!=="未確認")));
+                  const isEditingSame = showSame && editingSame && editingSame.runKey===run.key && editingSame.rid===r.rid;
                   return (
                   <td key={run.key} style={{ padding:0 }}>
                     <div style={{ background:st.bg, border:`1px solid ${st.bd}`, borderRadius:7, padding:"7px 8px", minHeight:48, display:"flex", flexDirection:"column", justifyContent:"center", gap:2 }}>
@@ -1163,9 +1443,18 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                       {c.status==="leak" && <>
                         <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:800 }}>申請発生</span><Badge kind={c.kind}/></div>
                         <span style={{ fontSize:9, color:"#ffb3a8" }}>{c.dueDate<TODAY?"既発効・即対応":`${fmt(c.dueDate)}までに`}</span></>}
+                      {showSame && !isEditingSame &&
+                        <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c}
+                          onOpen={base.state==="ok" ? ()=>{ setEditing(null); setEditDraft(null); setEditingSame({ runKey:run.key, rid:r.rid }); setSameDraft(null); } : null} />}
+                      {isEditingSame &&
+                        <SamenessEditor rec={sameRec} run={run} reg={r} base={base} hasCert={!!c.ck}
+                          draft={sameDraft && sameDraft.runKey===run.key && sameDraft.rid===r.rid ? sameDraft : null}
+                          onDraftChange={(d)=>setSameDraft({ runKey:run.key, rid:r.rid, ...d })}
+                          onCancel={()=>{ setEditingSame(null); setSameDraft(null); }}
+                          onSave={(rec)=>{ onSaveSameness(rec); setEditingSame(null); setSameDraft(null); }} />}
                       {judge && !isEditing &&
                         <DecisionLine dec={dec} run={run} reg={r} regs={regs}
-                          onOpen={()=>{ setEditing({ runKey:run.key, rid:r.rid }); setEditDraft(null); }} />}
+                          onOpen={()=>{ setEditingSame(null); setSameDraft(null); setEditing({ runKey:run.key, rid:r.rid }); setEditDraft(null); }} />}
                       {isEditing &&
                         <DecisionEditor run={run} reg={r} regs={regs} dec={dec} auto={c} notice={notice}
                           draft={editDraft && editDraft.runKey===run.key && editDraft.rid===r.rid ? editDraft : null}
@@ -1198,6 +1487,17 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
           </span>
         </div>
       )}
+      {sameCtx && (
+        <div style={{ marginTop:8, fontSize:10.5, color:"#8fa3b8", lineHeight:1.75, background:`${SAME}0d`, border:`1px solid ${SAME}33`, borderRadius:9, padding:"8px 12px" }}>
+          <b style={{color:SAME}}>「同一性：」</b>は比較元（型式ランタブで選ぶ・同じプロジェクト内の別型式）と当該装置の性能が同一かの回答です。比較元を選んだランの列にだけ出ます。
+          <b style={{color:"#eef4fa"}}>同一</b>＝継続車側の規制日を適用、<b style={{color:"#eef4fa"}}>同一でない</b>＝新型車側の規制日を適用、未確認＝従来どおり新継で判定します。
+          同一でない・未確認に変わると<b>要再確認</b>になり、メモの保存では消えず、同一性を答え直して確定したときだけ消えます。認可書の実績があるセルには要再確認を出しません。
+          <span style={{ display:"inline-flex", alignItems:"center", gap:8, flexWrap:"wrap", marginTop:6 }}>
+            <span style={{ color:MUTE }}>見分け：</span>
+            <SamenessTag value="同一" /><SamenessTag value="同一でない" /><SamenessTag value="未確認" />
+          </span>
+        </div>
+      )}
       {filterActive && (
         <div style={{ marginTop:14, fontSize:10, color:MUTE, lineHeight:1.6 }}>
           下の<b style={{ color:"#8fa3b8" }}>コンプラ漏れ・実効ドロップは全体集計</b>です（表示フィルターの影響を受けず、全 {runs.length} 列を対象にします）。
@@ -1226,6 +1526,133 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
         </Card>
       </div>
     </>
+  );
+}
+
+// ===== 同一性（F-04）：列見出しの比較元・セル内の表示と編集 =====
+// 色は自動判定（赤・緑・黄）とも人の適用判断（紫）とも別系統にする。
+export const SAME = "#6db5ff";
+const SAMENESS_TAG = {
+  "同一":       { fg:"#e3f0ff", bg:"rgba(109,181,255,0.22)", border:`1px solid ${SAME}`,    radius:999 },
+  "同一でない": { fg:"#ffe2dc", bg:"rgba(9,16,26,0.82)",     border:"1.5px solid #ff9e7d", radius:3   },
+  "未確認":     { fg:"#9aabbd", bg:"rgba(12,20,32,0.55)",    border:`1px dashed ${MUTE}`,  radius:999 },
+};
+export function SamenessTag({ value }) {
+  const t = SAMENESS_TAG[value] || SAMENESS_TAG["未確認"];
+  return (
+    <span style={{ display:"inline-flex", alignItems:"center", lineHeight:1.15, fontSize:9.5, fontWeight:700,
+      color:t.fg, background:t.bg, border:t.border, borderRadius:t.radius, padding:"0 4px", whiteSpace:"nowrap" }}>{value}</span>
+  );
+}
+
+// 列見出しの「比較元」表示。未選択の列には何も出さない（従来の見出しのまま）。
+function BaseLabel({ base }) {
+  if (!base || base.state === "none") return null;
+  if (base.state === "invalid") {
+    return <div style={{ fontSize:9, color:AMBER, marginTop:3 }}>⚠ 比較元が無効（型式ランタブで選び直し）</div>;
+  }
+  return (
+    <div style={{ fontSize:9, color:SAME, marginTop:3 }}>
+      比較元 <span style={{ fontFamily:"ui-monospace,monospace", fontWeight:700 }}>{base.baseRun.typeId}</span>
+    </div>
+  );
+}
+
+// 「同一でない」は新型ランの式で判定する。この式は 新型車日≤LO でなければ 継続車日≤drop で要否を決めるため、
+// 実際に要になった日付の種類（auto.kind）で表示し、継続車日で要のセルを「新型車日を適用」と書かない。
+const appliedText = (auto, eff) =>
+  auto.applied === "継続車日" ? "継続車日を適用"
+  : auto.applied === "新型車日"
+    ? (!auto.required ? "新型車の式で判定"
+      : auto.kind === "新型" ? "新型車日を適用"
+      : "新型車の式で判定・継続車日で要")
+  : eff === "未確認" ? "新継どおり" : "";
+
+// セル内の「同一性：」行。
+function SamenessLine({ rec, run, reg, base, auto, onOpen }) {
+  const eff = effectiveSameness(rec, base);          // 無効な比較元なら null
+  const shown = eff ?? "未確認";
+  const stale = !!rec && rec.value !== "未確認" && eff === "未確認";
+  const live = samenessRecheckReasons(rec, run, reg, base);
+  // 認可書の実績があるセルでは要再確認を出さない（記録上のフラグは残す。実績を消すとまた出る）
+  const recheck = !auto.ck && (!!rec?.needsRecheck || live.length > 0);
+  // 同一でない→新型車日で、適用日が過去なのに実績がない＝期限超過（要再確認の有無と関係なく出す）
+  const overdue = auto.applied === "新型車日" && auto.status === "leak" && auto.dueDate && auto.dueDate < TODAY;
+  return (
+    <div style={{ borderTop:`1px dashed ${LINE}`, marginTop:5, paddingTop:4, display:"flex", flexDirection:"column", gap:3 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" }}>
+        <span style={{ fontSize:9, color:MUTE, flex:"none" }}>同一性：</span>
+        <SamenessTag value={shown} />
+        {recheck && <RecheckBadge />}
+        <span style={{ flex:1, minWidth:4 }} />
+        {onOpen && (
+          <button onClick={onOpen} aria-label="同一性を編集" title="同一性を編集"
+            style={{ display:"inline-flex", alignItems:"center", flex:"none", cursor:"pointer",
+              background:`${SAME}1f`, border:`1px solid ${SAME}66`, borderRadius:5, color:SAME, lineHeight:0, padding:"2px 4px" }}>
+            <Pencil size={11} color={SAME}/></button>
+        )}
+      </div>
+      <span style={{ fontSize:9, color:"#8fa3b8", lineHeight:1.5 }}>
+        {base.state === "invalid" ? "比較元が無効のため新継どおり"
+          : base.state === "none" ? "比較元が未選択のため新継どおり（比較元を選び直して答え直すと要再確認が消えます）"
+          : appliedText(auto, eff)}
+        {auto.required && auto.applied && auto.dueDate ? ` ${fmt(auto.dueDate)}` : ""}
+        {overdue && <b style={{ color:RED }}> 期限超過</b>}
+        {stale && <span style={{ color:AMBER }}>（前の比較元への回答）</span>}
+      </span>
+    </div>
+  );
+}
+
+// セルから開く同一性の編集領域。
+function SamenessEditor({ rec, run, reg, base, hasCert, onSave, onCancel, draft, onDraftChange }) {
+  const stored = rec?.value || "未確認";
+  const [value, _setValue] = useState(draft?.value ?? stored);
+  const [reason, _setReason] = useState(draft?.reason ?? (rec?.reason || ""));
+  const setValue = (v) => { _setValue(v); onDraftChange?.({ value: v, reason }); };
+  const setReason = (v) => { _setReason(v); onDraftChange?.({ value, reason: v }); };
+  const live = samenessRecheckReasons(rec, run, reg, base);
+  const recheck = !hasCert && (!!rec?.needsRecheck || live.length > 0);
+  const same = value === stored;
+  // 回答した時の比較元といまの比較元が違う回答（要再確認を立てないセルでも起こる）
+  const stale = !!rec && rec.value !== "未確認" && base?.state === "ok" && rec.baseRunKey !== base.baseRunKey;
+  const save = () => onSave(nextSamenessRecord({ rec, run, reg, base, value, reason }));
+  const reconfirm = () => onSave(nextSamenessRecord({ rec, run, reg, base, value, reason, action: "reconfirm" }));
+  return (
+    <div style={{ marginTop:5, borderTop:`1px dashed ${LINE}`, paddingTop:6, display:"flex", flexDirection:"column", gap:6, textAlign:"left" }}>
+      <div style={{ fontSize:9, color:MUTE, lineHeight:1.6 }}>
+        <div><b style={{ color:"#eef4fa" }}>{run.typeId}</b> × <b style={{ color:"#eef4fa" }}>{reg.id||"（法規ID未入力）"}</b></div>
+        <div>比較元 <b style={{ color:SAME }}>{base.baseRun.typeId}</b> と当該装置の性能は同一か</div>
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+        {SAMENESS_VALUES.map((v)=>(
+          <label key={v} style={{ display:"flex", alignItems:"center", gap:5, fontSize:10.5, cursor:"pointer", fontWeight: value===v ? 700 : 400 }}>
+            <input type="radio" name={`same-${run.key}-${reg.rid}`} checked={value===v} onChange={()=>setValue(v)} style={{ margin:0 }} />
+            <SamenessTag value={v} />
+            <span style={{ fontSize:9, color:MUTE }}>{v==="同一" ? "継続車日を適用" : v==="同一でない" ? "新型車日を適用" : "新継どおり"}</span>
+          </label>
+        ))}
+      </div>
+      <textarea value={reason} onChange={(e)=>setReason(e.target.value)}
+        placeholder="理由・メモ（そのまま文字として保存されます）" rows={2}
+        style={{ background:"#0c1623", border:`1px solid ${LINE}`, borderRadius:6, color:"#cdd9e5", fontSize:10.5, padding:"5px 6px", width:"100%", boxSizing:"border-box", resize:"vertical", fontFamily:"inherit" }} />
+      {stale && !recheck && (
+        <div style={{ fontSize:9, color:AMBER, lineHeight:1.6 }}>前の比較元への回答です。いまの比較元で答え直して確定すると判定に使われます。</div>
+      )}
+      {recheck && (
+        <div style={{ fontSize:9, color:AMBER, lineHeight:1.6 }}>
+          ⚠ 要再確認{live.length>0 && <>：{live.join("／")}</>}
+          <div style={{ color:MUTE }}>メモの保存では消えません。同一性を答え直して確定すると消えます。</div>
+        </div>
+      )}
+      {rec?.decidedAt && <div style={{ fontSize:9, color:MUTE }}>確定：{rec.decidedAt}</div>}
+      <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+        <button onClick={save} style={miniBtn}>{same ? "メモを保存" : value==="未確認" ? "未確認に戻す" : "この回答で確定"}</button>
+        {(recheck || stale) && same && value!=="未確認" &&
+          <button onClick={reconfirm} style={{ ...miniBtn, borderColor:AMBER, color:AMBER }}>答え直して確定</button>}
+        <button onClick={onCancel} style={miniBtn}>キャンセル</button>
+      </div>
+    </div>
   );
 }
 
@@ -1403,7 +1830,9 @@ function DecisionEditor({ run, reg, regs, dec, auto, notice, onSave, onCancel, d
 // ===== 型式ラン編集 =====
 // onDeleteRun は省略可能。渡された場合、行の削除と同じ操作でその行を参照する判断も取り除く
 // （参照整合性のため。既存の削除手順そのものは変えていない）。
-export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun }) {
+// bases / onSetBase は省略可能（F-04・単体版のみ）。渡されたときだけ「比較元」列を出す。
+export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun, bases, onSetBase }) {
+  const withBase = Array.isArray(bases) && !!onSetBase;
   const up=(key,field,val)=>setRuns(rs=>rs.map(r=>r.key===key?{...r,[field]:val}:r));
   // キーの確保は updater の外で行う。
   // updater 内で採番すると、StrictMode などで再実行されたときに採番だけが余分に進む
@@ -1419,7 +1848,7 @@ export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun }) {
   return (
     <EditorShell title="型式ラン（型式 × プロジェクト）" desc="車両型式・プロジェクトコード・新継・LO・ドロップを入力。同じ型式を複数ランで使える（新→継など）。プロジェクトコードは任意の識別記号（世代・MC・継承関係は推測しない）。" onAdd={add} addLabel="ランを追加">
       <table style={tbl}>
-        <thead><tr>{["型式","プロジェクトコード","新継","LO（生産開始）","ドロップ（生産終了）",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+        <thead><tr>{["型式","プロジェクトコード","新継","LO（生産開始）","ドロップ（生産終了）",...(withBase?["比較元（同じプロジェクト内）"]:[]),""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>
           {runs.map(r=>(
             <tr key={r.key}>
@@ -1427,16 +1856,39 @@ export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun }) {
                 <span style={{ width:8,height:8,borderRadius:2,background:colorOf(r.typeId) }}/>
                 <input value={r.typeId} placeholder="DEMO-0001" onChange={e=>up(r.key,"typeId",e.target.value)} style={{...inp, fontFamily:"ui-monospace,monospace", width:120}}/>
               </div></td>
-              <td style={td}><input value={r.gen} placeholder="FMC2026" onChange={e=>up(r.key,"gen",e.target.value)} style={inp}/></td>
+              <td style={td}><input value={r.gen} placeholder="000A" onChange={e=>up(r.key,"gen",e.target.value)} style={inp}/></td>
               <td style={td}><select value={r.sk} onChange={e=>up(r.key,"sk",e.target.value)} style={{...inp, width:64}}><option value="新">新型</option><option value="継">継続</option></select></td>
               <td style={td}><input type="date" value={r.lo} onChange={e=>up(r.key,"lo",e.target.value)} style={{...inp, fontFamily:"ui-monospace,monospace"}}/></td>
               <td style={td}><input type="date" value={r.drop} onChange={e=>up(r.key,"drop",e.target.value)} style={{...inp, fontFamily:"ui-monospace,monospace"}}/></td>
+              {withBase && <td style={td}><BaseSelect run={r} runs={runs} bases={bases} onSetBase={onSetBase} /></td>}
               <td style={td}><button onClick={()=>del(r.key)} style={iconBtn}><Trash2 size={14} color={RED}/></button></td>
             </tr>
           ))}
         </tbody>
       </table>
     </EditorShell>
+  );
+}
+
+// 比較元の選択欄。候補は同じプロジェクトコードの別型式ラン（システムが出す）。選ぶと確定になる。
+function BaseSelect({ run, runs, bases, onSetBase }) {
+  const base = baseOf(run, runs, bases);
+  const cands = baseCandidates(run, runs);
+  const value = base.state === "none" ? "" : base.rec.baseRunKey;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+      <select value={value} aria-label="比較元" onChange={e=>onSetBase(run.key, e.target.value)}
+        style={{ ...inp, width:170, color: base.state==="none" ? MUTE : base.state==="invalid" ? AMBER : SAME }}>
+        <option value="">（未選択）</option>
+        {base.state==="invalid" && <option value={value}>無効：{base.baseRun ? base.baseRun.typeId || value : value}</option>}
+        {cands.map(x=><option key={x.key} value={x.key}>{x.typeId || "（型式未入力）"}　LO {x.lo || "—"}</option>)}
+      </select>
+      <span style={{ fontSize:9, color: base.state==="invalid" ? AMBER : MUTE }}>
+        {base.state==="ok" ? `選択済み（${base.rec.decidedAt}）`
+          : base.state==="invalid" ? "無効：同じプロジェクトの別型式ではありません"
+          : run.gen==="" ? "プロジェクトコード未入力" : cands.length===0 ? "候補なし" : `候補 ${cands.length} 件`}
+      </span>
+    </div>
   );
 }
 
