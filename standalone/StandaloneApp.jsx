@@ -17,6 +17,8 @@ import {
   MatrixView, RunsEditor, RegsEditor, CertEditor,
   sweepRecheck, upsertDecision, normalizeDecisions, markRunNeedsRecheck,
   pruneDecisionsByRun, pruneDecisionsByReg,
+  setBase, sweepSameness, upsertSameness, normalizeSameness, makeSamenessContext,
+  pruneBasesByRun, pruneSamenessByRun, pruneSamenessByReg,
   INK, PALETTE, btn,
 } from "../src/IListApp.jsx";
 
@@ -94,6 +96,11 @@ export default function StandaloneApp({ bootData } = {}) {
   const [selTypes, setSelTypes] = useState([]);
   const clearColumnFilter = () => { setSelProjects([]); setSelTypes([]); };
 
+  // 規制再判定のデータ（F-04）：比較元（bases）と同一性（sameness）。SEEDには含めない（全ラン未選択）。
+  // ※ 検証ハーネスが既存Hookの順序を観測しているため、既存のstateより後ろに置く。
+  const [bases, _setBases] = useState(bootOk ? bootData.data.bases : []);
+  const [sameness, _setSameness] = useState(bootOk ? bootData.data.sameness : []);
+
   // データ変更を受け付けた時点で「未書き出し」にする。
   // updater関数もそのまま渡せるよう、副作用はupdaterの外（呼び出し時）で行う。
   const markDirty = () => setSaveState("dirty");
@@ -101,6 +108,8 @@ export default function StandaloneApp({ bootData } = {}) {
   const setRegs = (v) => { markDirty(); _setRegs(v); };
   const setCert = (v) => { markDirty(); _setCert(v); };
   const setDecisions = (v) => { markDirty(); _setDecisions(v); };
+  const setBases = (v) => { markDirty(); _setBases(v); };
+  const setSameness = (v) => { markDirty(); _setSameness(v); };
 
   const dirty = state === "dirty";
 
@@ -122,20 +131,39 @@ export default function StandaloneApp({ bootData } = {}) {
     markDirty();
   }, [runs, regs, decisions]);
 
+  // 同一性の要再確認も同じ考え方で掃き出す（比較元の変更・無効化で立てる。下ろさない）。
+  useEffect(() => {
+    const swept = sweepSameness(sameness, runs, regs, bases);
+    if (swept === sameness) return;
+    _setSameness(swept);
+    markDirty();
+  }, [runs, regs, bases, sameness]);
+
   // ── 判断の編集・整合 ──
   // セルの編集領域から確定・メモ保存された1件を反映する（他の判断には触れない）。
   const handleSaveDecision = (rec) => setDecisions((ds) => upsertDecision(ds, rec));
   // ランの見出しからの手動要再確認（装備変更など自動検知できない条件のため）。
   const handleRecheckRun = (runKey) => setDecisions((ds) => markRunNeedsRecheck(ds, runKey));
   // 行削除と同じ操作で、その行を参照する判断だけを取り除く（孤立参照を作らない）。
-  const handleDeleteRun = (runKey) => setDecisions((ds) => pruneDecisionsByRun(ds, runKey));
-  const handleDeleteReg = (rid) => setDecisions((ds) => pruneDecisionsByReg(ds, rid));
+  const handleDeleteRun = (runKey) => {
+    setDecisions((ds) => pruneDecisionsByRun(ds, runKey));
+    setBases((bs) => pruneBasesByRun(bs, runKey));
+    setSameness((ss) => pruneSamenessByRun(ss, runKey));
+  };
+  const handleDeleteReg = (rid) => {
+    setDecisions((ds) => pruneDecisionsByReg(ds, rid));
+    setSameness((ss) => pruneSamenessByReg(ss, rid));
+  };
+  // 比較元の選択・変更・解除（型式ランタブ）と、同一性1件の保存（帳票セル）。
+  const handleSetBase = (runKey, baseRunKey) => setBases((bs) => setBase(bs, runKey, baseRunKey));
+  const handleSaveSameness = (rec) => setSameness((ss) => upsertSameness(ss, rec));
 
   // 書き出す中身。
   // 掃き出しEffectの反映を待たずに済むよう、ここでも同じ sweepRecheck を通してから書き出す
   // （純関数なので結果は同じ。Effectより先に保存ボタンが押されても古いフラグを書き出さない）。
   // 情報を持たない未確認レコードは落とす（レコード無し＝未確認と同義）。
-  const snapshot = () => ({ runs, regs, cert, decisions: normalizeDecisions(sweepRecheck(decisions, runs, regs)) });
+  const snapshot = () => ({ runs, regs, cert, decisions: normalizeDecisions(sweepRecheck(decisions, runs, regs)),
+    bases, sameness: normalizeSameness(sweepSameness(sameness, runs, regs, bases)) });
 
   // 未書き出しのまま閉じようとしたら警告する。
   // ブラウザ依存であり、これはデータ保存の代わりにはならない。
@@ -149,8 +177,10 @@ export default function StandaloneApp({ bootData } = {}) {
   const typeIds = useMemo(() => [...new Set(runs.map(r => r.typeId))], [runs]);
   const colorOf = (typeId) => PALETTE[typeIds.indexOf(typeId) % PALETTE.length];
   // 判定ロジックは共有（src/IListApp.jsx の純関数を使う）
-  const evalCell = (run, r) => evalCellWith(cert, run, r);
-  const summary = useMemo(() => summarize(runs, regs, cert), [runs, regs, cert]);
+  // 同一性（F-04）で継続車日／新型車日を切り替える。比較元が未選択・無効のランは従来どおり。
+  const sameCtx = useMemo(() => makeSamenessContext(runs, bases, sameness), [runs, bases, sameness]);
+  const evalCell = (run, r) => evalCellWith(cert, run, r, sameCtx.effective(run, r));
+  const summary = useMemo(() => summarize(runs, regs, cert, sameCtx.effective), [runs, regs, cert, sameCtx]);
 
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify(snapshot(), null, 2)], { type:"application/json" });
@@ -233,10 +263,13 @@ export default function StandaloneApp({ bootData } = {}) {
       // 確認ダイアログの表示中に別の読込が始まっている可能性があるため、置換直前に再確認する
       if (isStale()) return;
 
-      const { runs: nextRuns, regs: nextRegs, cert: nextCert, decisions: nextDecisions } = parsed.data;
+      const { runs: nextRuns, regs: nextRegs, cert: nextCert, decisions: nextDecisions,
+        bases: nextBases, sameness: nextSameness } = parsed.data;
       const sweptDecisions = sweepRecheck(nextDecisions, nextRuns, nextRegs);
+      const sweptSameness = sweepSameness(nextSameness, nextRuns, nextRegs, nextBases);
       _setRuns(nextRuns); _setRegs(nextRegs); _setCert(nextCert);
       _setDecisions(sweptDecisions);
+      _setBases(nextBases); _setSameness(sweptSameness);
       setDataGen((g) => g + 1);          // 置換が成功したので、開いている編集領域を閉じさせる
       clearColumnFilter();               // 別データに替わったので列表示フィルターは全解除する
 
@@ -245,7 +278,7 @@ export default function StandaloneApp({ bootData } = {}) {
       applyImported({ maxId: parsed.maxId, maxRid: parsed.maxRid });
       // 読込時の掃き出しで変わった保存対象も保護する。
       // 後続Effectでは既に整合済みなので、ここでdirtyRefと保存表示を同時に更新する。
-      setSaveState(sweptDecisions !== nextDecisions ? "dirty" : "imported");
+      setSaveState(sweptDecisions !== nextDecisions || sweptSameness !== nextSameness ? "dirty" : "imported");
     };
     reader.onerror = () => {
       if (isStale()) return;              // 古い読込の失敗で表示を変えない
@@ -294,7 +327,7 @@ export default function StandaloneApp({ bootData } = {}) {
           いずれも<strong>ダウンロードを開始したことしか分かりません</strong>。実際にディスクへ保存されたかはブラウザの表示で確認してください。
           元のファイルは自動更新されません（開き直しても保存前の内容のままです）。<br />
           タブを閉じる際の警告はブラウザによって出ないことがあります。<strong>警告はデータ保存の代わりにはなりません。</strong><br />
-          人の適用判断・理由メモは、この単体版で作るファイルにだけ入ります。<strong>サーバ保存版（API版）では読み込めません</strong>（誤って選んでも取り込まずに中止します）。
+          人の適用判断・理由メモ、比較元・同一性は、この単体版で作るファイルにだけ入ります。<strong>サーバ保存版（API版）では読み込めません</strong>（誤って選んでも取り込まずに中止します）。
           古い版のアプリが新しい項目を無視することは「互換」ではありません。<strong>元のファイルは消さずに残してください。</strong>
         </div>
 
@@ -314,8 +347,9 @@ export default function StandaloneApp({ bootData } = {}) {
         {/* 画面本体（API版と同じ部品を使う） */}
         {tab==="帳票" && <MatrixView {...{runs,regs,evalCell,summary,colorOf,decisions,dataGen}}
           columnFilter={{ selProjects, setSelProjects, selTypes, setSelTypes, clear: clearColumnFilter }}
-          onSaveDecision={handleSaveDecision} onRecheckRun={handleRecheckRun} />}
-        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey}} onDeleteRun={handleDeleteRun} />}
+          onSaveDecision={handleSaveDecision} onRecheckRun={handleRecheckRun}
+          sameCtx={sameCtx} onSaveSameness={handleSaveSameness} />}
+        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey,bases}} onDeleteRun={handleDeleteRun} onSetBase={handleSetBase} />}
         {tab==="法規DB" && <RegsEditor {...{regs,setRegs}} onDeleteReg={handleDeleteReg} />}
         {tab==="認可書実績" && <CertEditor {...{typeIds,regs,cert,setCert,colorOf,evalCell,runs}} />}
       </div>

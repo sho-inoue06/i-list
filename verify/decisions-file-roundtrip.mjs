@@ -72,7 +72,11 @@ const check = (label, actual, expected) => {
   console.log(`${ok ? "OK" : "NG"} ${label}`);
 };
 const input = {
-  runs: [{ key: "r101", typeId: "DEMO-ROUNDTRIP", gen: "DUMMY-PJ", sk: "新", lo: "2024-01-01", drop: "2027-12-31" }],
+  runs: [
+    { key: "r101", typeId: "DEMO-ROUNDTRIP", gen: "DUMMY-PJ", sk: "新", lo: "2024-01-01", drop: "2027-12-31" },
+    // F-04：同じプロジェクトの別型式（r101 の比較元）
+    { key: "r102", typeId: "DEMO-ROUNDTRIP-BASE", gen: "DUMMY-PJ", sk: "新", lo: "2022-01-01", drop: "2027-12-31" },
+  ],
   regs: [
     { rid: "g101", id: "DUMMY-PARENT", label: "ダミー親", shin: "2023-01-01", kei: "2025-01-01", parent: "" },
     { rid: "g102", id: "DUMMY-CHILD", label: "ダミー子", shin: "2023-02-01", kei: "2026-02-10", parent: "DUMMY-PARENT" },
@@ -83,6 +87,12 @@ const input = {
       cond: { typeId: "DEMO-ROUNDTRIP", sk: "新", lo: "2001-01-01", drop: "2027-12-31", regId: "DUMMY-CHILD",
         shin: "2023-02-01", kei: "2026-02-10", parent: "DUMMY-PARENT", parentLink: "one", parentRid: "g101" } },
     { runKey: "r101", rid: "g101", state: "対象", reason: "確定時条件なし（ダミー）", decidedAt: "2026-09-02 12:34", needsRecheck: false, cond: null },
+  ],
+  // F-04：比較元と同一性（掃き出しで変わらない値にしてあるので、期待値は入力のまま）
+  bases: [{ runKey: "r101", baseRunKey: "r102", decidedAt: "2026-09-19 10:20" }],
+  sameness: [
+    { runKey: "r101", rid: "g102", value: "同一でない", reason: REASON, decidedAt: "2026-09-19 10:21", needsRecheck: false, baseRunKey: "r102" },
+    { runKey: "r101", rid: "g101", value: "未確認", reason: "", decidedAt: "", needsRecheck: true, baseRunKey: "" },
   ],
 };
 // 期待値は出力から作らず、入力に対する仕様（両判断でtrueになる）から保存操作前に定める。
@@ -121,7 +131,14 @@ const download = async (button, extension) => {
   throw new Error(`download missing: ${button}`);
 };
 const compare = (label, data) => {
-  check(`${label}: runs/regs/cert/decisions全体の値`, data, expected);
+  check(`${label}: runs/regs/cert/decisions/bases/sameness全体の値`, data, expected);
+  for (const area of ["bases", "sameness"]) {
+    for (let i = 0; i < expected[area].length; i++) {
+      for (const key of Object.keys(expected[area][i])) {
+        check(`${label}: ${area}[${i}].${key}`, data[area]?.[i]?.[key], expected[area][i][key]);
+      }
+    }
+  }
   for (let i = 0; i < expected.decisions.length; i++) {
     for (const key of ["runKey", "rid", "state", "reason", "decidedAt", "needsRecheck", "cond"]) {
       check(`${label}: decisions[${i}].${key}`, data.decisions?.[i]?.[key], expected.decisions[i][key]);
@@ -143,6 +160,8 @@ check("保存版起動は不要なdirtyなし", await status(), "保存済みの
 const boot = await ev(`JSON.parse(document.getElementById('ilist-boot-data').textContent)`);
 compare("保存版を開いたDOMの起動データ", boot);
 check("保存版で要再確認2件を描画", await ev(`[...document.querySelectorAll('table tbody td')].filter(td => td.textContent.includes('要再確認')).length`), 2);
+check("保存版で比較元を見出しに描画", await ev(`[...document.querySelectorAll('table thead th')].some(th => th.textContent.includes('比較元 DEMO-ROUNDTRIP-BASE'))`), true);
+check("保存版で同一でない→期限超過を描画", await ev(`[...document.querySelectorAll('table tbody td')].filter(td => td.textContent.includes('期限超過')).length`), 1);
 check("HTML風理由のスクリプト実行なし", await ev("window.__PWNED__ === undefined"), true);
 const afterHTML = await download("JSONに書き出し", ".json");
 compare("保存版起動後のJSON再書出し", JSON.parse(readFileSync(afterHTML, "utf8")));

@@ -1,0 +1,23 @@
+{
+  "runs": [
+    { "key": "r201", "typeId": "DEMO-P", "gen": "PJ-1", "sk": "新", "lo": "2021-01-01", "drop": "2022-12-31" },
+    { "key": "r202", "typeId": "DEMO-Q", "gen": "PJ-1", "sk": "新", "lo": "2021-06-01", "drop": "2022-12-31" },
+    { "key": "r204", "typeId": "DEMO-P", "gen": "PJ-2", "sk": "継", "lo": "2023-01-01", "drop": "2025-12-31" },
+    { "key": "r203", "typeId": "DEMO-Q", "gen": "PJ-2", "sk": "継", "lo": "2023-01-01", "drop": "2025-12-31" },
+    { "key": "r205", "typeId": "DEMO-R", "gen": "PJ-3", "sk": "新", "lo": "2021-01-01", "drop": "2030-12-31" }
+  ],
+  "regs": [
+    { "rid": "g201", "id": "DEMO-REG-N", "label": "ダミー法規N（過渡規定あり）", "shin": "2021-03-01", "kei": "2023-10-01", "parent": "" },
+    { "rid": "g202", "id": "DEMO-REG-M", "label": "ダミー法規M", "shin": "2019-01-01", "kei": "2020-01-01", "parent": "" }
+  ],
+  "cert": { "DEMO-P": { "DEMO-REG-M": "DEMO*M00/00*01" } },
+  "decisions": [],
+  "bases": [
+    { "runKey": "r202", "baseRunKey": "r201", "decidedAt": "2026-09-19 10:20" },
+    { "runKey": "r203", "baseRunKey": "r204", "decidedAt": "2026-09-19 10:20" }
+  ],
+  "sameness": [
+    { "runKey": "r202", "rid": "g201", "value": "同一", "reason": "ダミー：音源・スピーカは比較元と同じ", "decidedAt": "2026-09-19 10:21", "needsRecheck": false, "baseRunKey": "r201" },
+    { "runKey": "r203", "rid": "g201", "value": "同一でない", "reason": "ダミー：PJ-2で音源を変更", "decidedAt": "2026-09-19 10:22", "needsRecheck": true, "baseRunKey": "r204" }
+  ]
+}
