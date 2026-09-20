@@ -56,6 +56,20 @@ const YESTERDAY = shift(-1), TODAY_D = shift(0), TOMORROW = shift(1);
 const LONG_AGO = shift(-3650), FAR = shift(3650);
 const STAMP = `${TODAY_D} 10:00`;
 const fmt = (d) => d.replaceAll("-", "/").slice(0, 7);   // 画面表示（YYYY/MM）と同じ整形
+
+// 実在しない日付（例：2月30日）を拒むことの確認用。
+// 「日付が読めないからnull」なのか「窓の外だからnull」なのかを区別できるように作る：
+//   ・必ず将来の年の 2月30日 にする（F-15のゲートで消えたのではないことを分けるため）
+//   ・仮に繰り上がって 3/1〜3/2 と解釈されてしまった場合、dropとの差が9〜10日＝窓の中に入る位置にdropを置く
+// つまり実在性チェックが外れていれば、この組み合わせは null ではなく予告を返すようになる。
+const FUTURE_YEAR = Number(shift(400).slice(0, 4));      // 端末日付がいつでも必ず将来の年
+const INVALID_KEI = `${FUTURE_YEAR}-02-30`;              // 実在しない日付
+const INVALID_KEI_DROP = `${FUTURE_YEAR}-02-20`;         // 繰り上がると差は9〜10日（窓の中）
+// 繰り上がった場合の解釈（うるう年なら3/1、それ以外は3/2）。陽性対照に使う。
+const INVALID_KEI_ROLLED = (() => {
+  const t = new Date(Date.UTC(FUTURE_YEAR, 1, 30)), p = (n) => String(n).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())}`;
+})();
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 // 画面に出る黄色の文言（検証側で独立に書き、製品の定数を借りない）
@@ -218,7 +232,17 @@ const SCENARIOS = [
       asserts.check("認可書ありのセルには出さない", approachingNoticeFor("ok", { drop: TODAY_D }, { kei: shift(10) }), null);
       asserts.check("dropが空なら出さない", approachingNoticeFor("off", { drop: "" }, { kei: shift(10) }), null);
       asserts.check("継続車日が空なら出さない", approachingNoticeFor("off", { drop: TODAY_D }, { kei: "" }), null);
-      asserts.check("継続車日が実在しない日付なら出さない", approachingNoticeFor("off", { drop: TODAY_D }, { kei: "2026-02-30" }), null);
+      // 実在しない日付。繰り上がって解釈されれば窓の中（9〜10日）に入る組み合わせなので、
+      // 実在性チェックが外れていればここは null にならない（＝この期待値は素通りしない）。
+      asserts.check("陽性対照：繰り上がった日付なら窓の中で予告が出る",
+        approachingNoticeFor("off", { drop: INVALID_KEI_DROP }, { kei: INVALID_KEI_ROLLED }),
+        { days: approachingKeiDays(INVALID_KEI_DROP, INVALID_KEI_ROLLED), keiDate: INVALID_KEI_ROLLED });
+      asserts.checkTrue("陽性対照の差は窓の中（1〜30日）",
+        approachingKeiDays(INVALID_KEI_DROP, INVALID_KEI_ROLLED) >= 1 && approachingKeiDays(INVALID_KEI_DROP, INVALID_KEI_ROLLED) <= 30);
+      asserts.check("継続車日が実在しない日付なら出さない",
+        approachingNoticeFor("off", { drop: INVALID_KEI_DROP }, { kei: INVALID_KEI }), null);
+      asserts.check("dropが実在しない日付でも出さない",
+        approachingNoticeFor("off", { drop: INVALID_KEI }, { kei: shift(10, INVALID_KEI_ROLLED) }), null);
       // 「今日」は引数で差し替えられる（既定は製品のTODAY）。基準日をUIや保存データへ持たせるものではない。
       asserts.check("todayを翌日にすると翌日の予告も消える",
         approachingNoticeFor("off", { drop: shift(-1, TOMORROW) }, { kei: TOMORROW }, TOMORROW), null);
@@ -240,7 +264,11 @@ const SCENARIOS = [
       asserts.check("同日（0日）は従来どおり対象外", approachingKeiDays(TODAY_D, TODAY_D), null);
       asserts.check("ドロップ日より前（負数）も対象外", approachingKeiDays(TODAY_D, YESTERDAY), null);
       asserts.check("31日は従来どおり対象外", approachingKeiDays(shift(-31, TOMORROW), TOMORROW), null);
-      asserts.check("読めない日付は従来どおりnull", [approachingKeiDays("", TOMORROW), approachingKeiDays(TODAY_D, "2026-02-30")], [null, null]);
+      // 窓の側でも実在しない日付を拒む。繰り上がれば窓の中に入る組み合わせで確かめる。
+      asserts.check("読めない日付は従来どおりnull",
+        [approachingKeiDays("", TOMORROW), approachingKeiDays(INVALID_KEI_DROP, INVALID_KEI)], [null, null]);
+      asserts.checkTrue("陽性対照：繰り上がれば窓の中",
+        approachingKeiDays(INVALID_KEI_DROP, INVALID_KEI_ROLLED) !== null);
     },
   },
   {

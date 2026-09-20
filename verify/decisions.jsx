@@ -55,10 +55,17 @@ function createAsserts() {
 // ── ダミーデータ（架空。実車・実法規・実認可番号とは無関係） ──
 // 同じ型式(DEMO-X)を2つのラン（PJ-A / PJ-B）が使う＝判断の独立性と実績共有の両方を見るため。
 //
-// 黄色の30日接近予告を見るセル（r103 × REG-4）の2つの日付だけは、実行時の端末ローカル日付から作る。
+// 黄色の30日接近予告を見るセル（r103 × REG-4）は、実行時の端末ローカル日付から作る。
 // F-15で「継続車日 ≤ 今日」には予告を出さなくなったため、固定日付のままだと
 // 時間の経過でこのハーネスの前提（黄色セル）が勝手に消えてしまう。
-// 21日という間隔と、他セルの判定（下の「期待する自動判定」）は変えない。
+// 21日という間隔と、下の「期待する自動判定」は変えない。
+//
+// 前後関係で判定が決まる日付は、相対日付どうしで並びを固定する（固定日付と混ぜない）。
+// 混ぜると、端末日付が進んだときに相対側が固定側を追い越して他セルの判定が変わってしまう。
+//   YELLOW_DROP(+10) < YELLOW_KEI(+31) < R101_DROP(+365) < REG3_KEI(+730) ≤ R102_DROP(+1095)
+// この並びが、行2（REG-3）＝[off, leak, off]・行3（REG-4）＝[leak, leak, off＋黄色21日] を保証する。
+// 残りの固定日付（LO・新型適用日・REG-1／REG-2の継続適用日）は、いずれも過去に置いたまま
+// 動かない側なので、並びが崩れることはない。
 const LOCAL_TODAY = (() => {
   const d = new Date(), p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
@@ -69,18 +76,21 @@ const shift = (days, from = LOCAL_TODAY) => {
   const p = (n) => String(n).padStart(2, "0");
   return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())}`;
 };
-const YELLOW_DROP = shift(10);   // これからドロップする（今日＋10日）
-const YELLOW_KEI = shift(31);    // その21日後に継続車規制が来る（今日＋31日＝これから）
+const YELLOW_DROP = shift(10);    // これからドロップする（今日＋10日）
+const YELLOW_KEI = shift(31);     // その21日後に継続車規制が来る（今日＋31日＝これから）
+const R101_DROP = shift(365);     // YELLOW_KEI より後（REG-4 が「要」）／REG3_KEI より前（REG-3 は「否」）
+const REG3_KEI = shift(730);      // R101_DROP より後・R102_DROP 以前
+const R102_DROP = shift(1095);    // すべての継続適用日より後（REG-1〜REG-4 が「要」）
 const DUMMY = {
   runs: [
-    { key: "r101", typeId: "DEMO-X", gen: "PJ-A", sk: "新", lo: "2024-01-01", drop: "2027-12-31" },
-    { key: "r102", typeId: "DEMO-X", gen: "PJ-B", sk: "継", lo: "2028-01-01", drop: "2030-12-31" },
+    { key: "r101", typeId: "DEMO-X", gen: "PJ-A", sk: "新", lo: "2024-01-01", drop: R101_DROP },
+    { key: "r102", typeId: "DEMO-X", gen: "PJ-B", sk: "継", lo: "2028-01-01", drop: R102_DROP },
     { key: "r103", typeId: "DEMO-Y", gen: "PJ-C", sk: "新", lo: "2024-01-01", drop: YELLOW_DROP },
   ],
   regs: [
     { rid: "g101", id: "REG-1", label: "ダミー法規1", shin: "2023-01-01", kei: "2025-01-01", parent: "" },
     { rid: "g102", id: "REG-2", label: "ダミー法規2", shin: "2023-01-01", kei: "2026-02-10", parent: "REG-1" },
-    { rid: "g103", id: "REG-3", label: "ダミー法規3", shin: "2029-01-01", kei: "2030-01-01", parent: "" },
+    { rid: "g103", id: "REG-3", label: "ダミー法規3", shin: "2029-01-01", kei: REG3_KEI, parent: "" },
     { rid: "g104", id: "REG-4", label: "ダミー法規4", shin: "2029-01-01", kei: YELLOW_KEI, parent: "" },
   ],
   cert: { "DEMO-X": { "REG-1": "CK-1" } },
