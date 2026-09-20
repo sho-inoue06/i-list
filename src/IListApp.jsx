@@ -122,6 +122,13 @@ export const evalCellWith = (cert, run, r, sameness) => {
 //     （安全側＝黄色を出さない。欠落・不正日付を「安全」とは表示しない＝
 //      呼び出し側は notice=null のとき何も表示しないだけで、
 //      「問題なし」の意味を持つ表示は一切出さない）。
+//
+// 過去分の除外（F-15）：上の窓（継続車日 − drop日 が1〜30日）は変えない。
+// そのうえで「継続車日 ≤ 今日」のランには出さない。黄色は これから来る規制日の予告 であって、
+// すでに過ぎた組み合わせを予告し続ける意味はないため。窓の条件がすでに drop日 < 継続車日 を含むので、
+// 継続車日だけで切れば過去にドロップしたランもまとめて外れる（drop側のゲートは足さない）。
+// 境界（継続車日が今日ちょうど）も出さない＝F-13の「期日 ≤ 今日は既発効」と揃える
+// （当日は予告ではなく、すでに期日）。
 // ───────────────────────────────────────────────
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // YYYY-MM-DD を UTC 日付として解釈し、その日数値を返す（タイムゾーンに依存させないため）。
@@ -150,10 +157,15 @@ export function approachingKeiDays(dropStr, keiStr) {
 
 // セル1つぶんの黄色注記。status が "off" 以外（ok/leak）には常に null を返す
 // （赤・緑の判定を黄色で弱めない）。
-export function approachingNoticeFor(cellStatus, run, r) {
+// today は既定で TODAY（F-13の端末ローカル日付）。読めない日付のときは黄色を出さない側へ寄せる
+// （この注記は「注記なし」が既定で、出さないことが誤った安全表示にはならないため）。
+export function approachingNoticeFor(cellStatus, run, r, today = TODAY) {
   if (cellStatus !== "off") return null;
   const days = approachingKeiDays(run?.drop, r?.kei);
   if (days === null) return null;
+  // 過去分の除外（F-15）。窓の判定（approachingKeiDays）は上で済ませており、ここでは変えない。
+  const keiDay = dateDayNumber(r?.kei), todayDay = dateDayNumber(today);
+  if (keiDay === null || todayDay === null || keiDay <= todayDay) return null;
   return { days, keiDate: r.kei };
 }
 
@@ -1571,7 +1583,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
       )}
       <div style={{ display:"flex", gap:16, marginTop:10, fontSize:10.5, color:MUTE, flexWrap:"wrap", alignItems:"center" }}>
         <Leg c={GREEN} t="要・認可書あり"/><Leg c={RED} t="要・実績なし＝申請発生"/><Leg c={MUTE} t="否＝対象外"/>
-        <Leg c={AMBER} t="否・ドロップ後30日以内に継続規制＝要再確認"/>
+        <Leg c={AMBER} t="否・ドロップ後30日以内にこれから継続規制＝要再確認"/>
         <span style={{ display:"inline-flex", gap:5 }}><Badge kind="新型"/>指定で適合<Badge kind="継続"/>継続対応</span>
       </div>
       <div style={{ marginTop:6, fontSize:10.5, color:MUTE, lineHeight:1.8 }}>

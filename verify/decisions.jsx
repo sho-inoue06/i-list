@@ -54,17 +54,34 @@ function createAsserts() {
 
 // ── ダミーデータ（架空。実車・実法規・実認可番号とは無関係） ──
 // 同じ型式(DEMO-X)を2つのラン（PJ-A / PJ-B）が使う＝判断の独立性と実績共有の両方を見るため。
+//
+// 黄色の30日接近予告を見るセル（r103 × REG-4）の2つの日付だけは、実行時の端末ローカル日付から作る。
+// F-15で「継続車日 ≤ 今日」には予告を出さなくなったため、固定日付のままだと
+// 時間の経過でこのハーネスの前提（黄色セル）が勝手に消えてしまう。
+// 21日という間隔と、他セルの判定（下の「期待する自動判定」）は変えない。
+const LOCAL_TODAY = (() => {
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+})();
+const shift = (days, from = LOCAL_TODAY) => {
+  const [y, m, d] = from.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d) + days * 86400000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())}`;
+};
+const YELLOW_DROP = shift(10);   // これからドロップする（今日＋10日）
+const YELLOW_KEI = shift(31);    // その21日後に継続車規制が来る（今日＋31日＝これから）
 const DUMMY = {
   runs: [
     { key: "r101", typeId: "DEMO-X", gen: "PJ-A", sk: "新", lo: "2024-01-01", drop: "2027-12-31" },
     { key: "r102", typeId: "DEMO-X", gen: "PJ-B", sk: "継", lo: "2028-01-01", drop: "2030-12-31" },
-    { key: "r103", typeId: "DEMO-Y", gen: "PJ-C", sk: "新", lo: "2024-01-01", drop: "2026-01-20" },
+    { key: "r103", typeId: "DEMO-Y", gen: "PJ-C", sk: "新", lo: "2024-01-01", drop: YELLOW_DROP },
   ],
   regs: [
     { rid: "g101", id: "REG-1", label: "ダミー法規1", shin: "2023-01-01", kei: "2025-01-01", parent: "" },
     { rid: "g102", id: "REG-2", label: "ダミー法規2", shin: "2023-01-01", kei: "2026-02-10", parent: "REG-1" },
     { rid: "g103", id: "REG-3", label: "ダミー法規3", shin: "2029-01-01", kei: "2030-01-01", parent: "" },
-    { rid: "g104", id: "REG-4", label: "ダミー法規4", shin: "2029-01-01", kei: "2026-02-10", parent: "" },
+    { rid: "g104", id: "REG-4", label: "ダミー法規4", shin: "2029-01-01", kei: YELLOW_KEI, parent: "" },
   ],
   cert: { "DEMO-X": { "REG-1": "CK-1" } },
 };

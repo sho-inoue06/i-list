@@ -18,7 +18,7 @@ import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
-  TODAY, todayStr, parseImportedData, evalCellWith, summarize, approachingNoticeFor,
+  TODAY, todayStr, parseImportedData, evalCellWith, summarize, approachingNoticeFor, approachingKeiDays,
 } from "../src/IListApp.jsx";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -278,7 +278,7 @@ const SCENARIOS = [
   {
     id: "A5-judgement-unchanged",
     name: "要／否・申請発生の判定、黄色の30日接近予告、要再確認は変わらない",
-    expect: "evalCellWith の戻り値は今日と無関係。黄色予告はドロップ日と継続車日だけで決まり、要再確認も変わらない",
+    expect: "evalCellWith の戻り値は今日と無関係。黄色予告の窓（drop→継続車日が1〜30日）は変わらず、要再確認も変わらない（F-15で過去分だけ出さなくなった）",
     async run({ mount, asserts }) {
       // 判定式は「今日」を参照しない（期日が前日・当日・翌日でも、要否・種別・期日は同じ形）
       const run = KEI_DUMMY.runs[0];
@@ -288,12 +288,15 @@ const SCENARIOS = [
         { required: true, kind: "継続", ck: null, status: "leak", dueDate: TODAY_D, applied: "" });
       asserts.check("翌日の期日（判定）", evalCellWith({}, run, KEI_DUMMY.regs[2]),
         { required: true, kind: "継続", ck: null, status: "leak", dueDate: TOMORROW, applied: "" });
-      // 黄色の30日接近予告：ドロップ日と継続車日の差だけで決まる（今日と無関係）
+      // 黄色の30日接近予告：窓（drop→継続車日が1〜30日）はF-13でもF-15でも変えていない。
+      // F-15で足したのは「継続車日 ≤ 今日は出さない」だけなので、これから来る分の日数表示は従来どおり。
       const near = { rid: "g331", id: "REG-NEAR", label: "ダミー法規（接近予告）", shin: FAR, kei: shift(10), parent: "" };
       const offRun = { ...run, drop: TODAY_D };
       asserts.check("今日の周辺でも10日で予告", approachingNoticeFor("off", offRun, near), { days: 10, keiDate: near.kei });
-      asserts.check("遠い過去でも同じ日数で予告",
-        approachingNoticeFor("off", { ...run, drop: shift(-3650) }, { ...near, kei: shift(-3640) }), { days: 10, keiDate: shift(-3640) });
+      asserts.check("窓の判定自体は変わらない（遠い過去でも10日）",
+        approachingKeiDays(shift(-3650), shift(-3640)), 10);
+      asserts.check("ただし遠い過去の組み合わせには予告を出さない（F-15）",
+        approachingNoticeFor("off", { ...run, drop: shift(-3650) }, { ...near, kei: shift(-3640) }), null);
       asserts.check("申請発生のセルには予告を出さない（従来どおり）", approachingNoticeFor("leak", offRun, near), null);
       // 同一性の要再確認は期日と無関係（法規不適合が出るセルでも出ないセルでも同じ）
       const c = await mountWith(mount, SAME_DUMMY);
