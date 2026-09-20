@@ -15,7 +15,7 @@ import { createRoot } from "react-dom/client";
 import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
   SEED, parseImportedData, replaceBootData, readBootData, evalCellWith,
-  baseCandidates, baseOf, setBase, samenessMatters, effectiveSameness, sweepSameness,
+  baseCandidates, baseOf, setBase, samenessMatters, samenessAffects, effectiveSameness, sweepSameness,
   nextSamenessRecord, SAMENESS_VALUES,
 } from "../src/IListApp.jsx";
 
@@ -344,8 +344,8 @@ const SCENARIOS = [
   },
   {
     id: "A6-overdue",
-    name: "同一でないと確定して適用日が過去日になったら、要再確認が消えても期限超過と分かる",
-    expect: "DEMO-Q(PJ-1)×REG-N を同一でない→答え直して確定。要再確認は出ず、『期限超過』『既発効・即対応』とコンプラ漏れの行が出る",
+    name: "同一でないと確定して適用日が過去日になったら、要再確認が消えても期日到来と分かる",
+    expect: "DEMO-Q(PJ-1)×REG-N を同一でない→答え直して確定。要再確認は出ず、期日到来の状態（このランは期日のあともドロップまで生産していたので灰『過去に法規不適合（drop済み）』）とコンプラ漏れの行が出る",
     async run({ mount, asserts }) {
       const c = await mountWith(mount);
       await chooseBase(c, "r202", "r201");
@@ -353,11 +353,17 @@ const SCENARIOS = [
       await editSame(c, "r202", "g201", { action: "答え直して確定" });
       const t = cellText(c, "r202", "g201");
       asserts.checkTrue("要再確認は消えている", !t.includes("要再確認"));
-      asserts.checkTrue("期限超過と出る", t.includes("期限超過"));
-      asserts.checkTrue("既発効・即対応と出る", t.includes("既発効・即対応"));
+      asserts.checkTrue("「期限超過」という別名は使わない（F-14）", !t.includes("期限超過"));
+      // このランは drop=2022-12-31 で既にドロップ済み。期日（新型車日 2021-03-01）はdropより前なので、
+      // 規制日のあともドロップまで実績なしで生産していた＝灰の「過去に法規不適合（drop済み）」になる。
+      asserts.check("セルに出る状態は1つだけ",
+        ["過去に法規不適合（drop済み）", "drop済み（対応対象外）", "要対応｜", "対象外（判断済み）"].filter((x) => t.includes(x)),
+        ["過去に法規不適合（drop済み）"]);
+      asserts.checkTrue("同一性の行にも同じ状態が出る", t.includes("新型車日を適用"));
       const leaks = [...c.querySelectorAll("h3")].find((h) => h.textContent.includes("コンプラ漏れ")).parentElement.parentElement.textContent;
-      asserts.checkTrue("コンプラ漏れに載る", /DEMO-Q（PJ-1）\s*×\s*REG-N新型\s*既発効・即対応/.test(leaks));
-      asserts.checkTrue("同一なら期限超過は出ない（対照）", !cellText(c, "r201", "g201").includes("期限超過"));
+      asserts.checkTrue("コンプラ漏れに載る（除外しない）", /DEMO-Q（PJ-1）\s*×\s*REG-N新型\s*過去に法規不適合（drop済み）/.test(leaks));
+      asserts.checkTrue("同一なら状態表示は出ない（対照：否のセル）",
+        !/法規不適合|drop済み（対応対象外）|要対応｜/.test(cellText(c, "r201", "g201")));
     },
   },
   {
@@ -595,25 +601,30 @@ const SCENARIOS = [
   },
   {
     id: "C4-label-follows-actual-date",
-    name: "同一でないで継続車日によって要になったセルを「新型車日を適用」と表示しない（Codex再レビュー指摘）",
-    expect: "LO 2020/06・drop 2024/12・新型車日 2021/03・継続車日 2023/10 で同一でない → 要（継続・2023/10）のまま、表示は『新型車の式で判定・継続車日で要 2023/10』",
+    name: "新型車日がLOより後のセルには同一性を出さない（旧C4の紛らわしい表示が起きない）",
+    expect: "LO 2020/06・新型車日 2021/03（LOより後）のセルは、比較元を選んでも同一性の行・編集ボタンを出さない。判定は要（継続・2023/10）のまま",
     async run({ mount, asserts }) {
+      // 旧C4（Codex再レビュー指摘）は「同一でないと答えたのに継続車日で要になるセル」の文言問題だった。
+      // 2026-09-20 祥の判断で、そもそも答えても結論が変わらないセルには同一性を出さなくなったため、
+      // その状態自体が起きない。ここでは「出さないこと」と「判定が変わらないこと」を確認する。
       const data = { ...clone(DUMMY), runs: [...clone(DUMMY.runs), { key: "r207", typeId: "DEMO-T", gen: "PJ-1", sk: "新", lo: "2020-06-01", drop: "2024-12-31" }] };
       const c = await mountWith(mount, data);
-      const td = () => cellAt(c, ROW.g201, 5).textContent;
+      const td = () => cellAt(c, ROW.g201, 5);
       await chooseBase(c, "r207", "r201");
-      await editSame(c, "r207", "g201", { value: "同一でない" });
-      asserts.checkTrue("判定は要（申請発生・継続）のまま", td().includes("申請発生") && td().includes("継続"));
-      asserts.checkTrue("実際の日付の種類で表示", td().includes("新型車の式で判定・継続車日で要 2023/10"));
-      asserts.checkTrue("『新型車日を適用』とは書かない", !td().includes("新型車日を適用"));
+      asserts.checkTrue("判定は要（申請発生・継続）のまま", td().textContent.includes("申請発生") && td().textContent.includes("継続"));
+      asserts.checkTrue("同一性の行を出さない", !td().textContent.includes("同一性"));
+      asserts.check("編集ボタンも出さない", td().querySelectorAll('button[title="同一性を編集"]').length, 0);
+      asserts.checkTrue("『新型車日を適用』も出ない", !td().textContent.includes("新型車日を適用"));
+      asserts.check("同一性が効くセルか（純関数）",
+        [samenessAffects(data.runs[5], DUMMY.regs[0]), samenessAffects(DUMMY.runs[1], DUMMY.regs[0])], [false, true]);
       const e = evalCellWith({}, data.runs[5], DUMMY.regs[0], "同一でない");
-      asserts.check("判定式の結果", [e.required, e.kind, e.dueDate], [true, "継続", "2023-10-01"]);
+      asserts.check("判定式の結果は変わらない", [e.required, e.kind, e.dueDate], [true, "継続", "2023-10-01"]);
     },
   },
   {
     id: "S-seed-demo",
     name: "単体版の初期表示（SEED）が検討用の各ケースを出す",
-    expect: "SEEDは検証を通り、開いた直後は『変更なし』。000Bで型式追加、000Cで同一でない・期限超過、LO≥継続車日、未確認に戻した要再確認、初回回答の要再確認が見える",
+    expect: "SEEDは検証を通り、開いた直後は『変更なし』。000Bで型式追加、000Cで同一でない・過去に法規不適合（drop済み）、LO≥継続車日、001Aで初回回答と未確認に戻した要再確認が見える。新型車日がLOより後のセルには同一性を出さない",
     async run({ mount, asserts }) {
       const p = parseImportedData(clone(SEED));
       asserts.check("SEEDはそのまま読込検証を通る", p.ok, true);
@@ -626,11 +637,23 @@ const SCENARIOS = [
       const at = (col, row) => cellAt(c, row, col).textContent;
       // 列：r1..r7 = 0..6、行：A,A2,B,C,D,E = 0..5
       asserts.checkTrue("r3×B 同一→継続車日で否", at(2, 2).includes("継続車日を適用") && at(2, 2).includes("否"));
-      asserts.checkTrue("r5×B 同一でない→期限超過", at(4, 2).includes("新型車日を適用") && at(4, 2).includes("期限超過"));
+      // r5 は 新型車日 2021-03-01 ≤ drop 2025-12-31（どちらも過去）なので、
+      // 規制日のあともドロップまで実績なしで生産していた＝「過去に法規不適合（drop済み）」になる（F-14）
+      asserts.checkTrue("r5×B 同一でない→新型車日で過去に法規不適合",
+        at(4, 2).includes("新型車日を適用") && at(4, 2).includes("過去に法規不適合（drop済み）") && !at(4, 2).includes("期限超過"));
       asserts.checkTrue("r5×D LO≥継続車日：要再確認なし・実績あり", !at(4, 4).includes("要再確認") && at(4, 4).includes("DEMO*D00/00*02"));
-      asserts.checkTrue("r3×C 未確認に戻した：要再確認（実績なし）", at(2, 3).includes("同一性：未確認") && at(2, 3).includes("要再確認"));
-      asserts.checkTrue("r7×E 初回回答：要再確認・継続車日で要", at(6, 5).includes("要再確認") && at(6, 5).includes("新型車の式で判定・継続車日で要"));
-      asserts.checkTrue("r7×C 未確認：新継どおり", at(6, 3).includes("新継どおり"));
+      // 要再確認の例は「同一性が効くセル」へ置いてある（r7×B・r7×C）
+      asserts.checkTrue("r7×B 初回回答：要再確認・新型車日を適用",
+        at(6, 2).includes("同一性：同一でない") && at(6, 2).includes("要再確認") && at(6, 2).includes("新型車日を適用"));
+      asserts.checkTrue("r7×C 未確認に戻した：要再確認・新継どおり",
+        at(6, 3).includes("同一性：未確認") && at(6, 3).includes("要再確認") && at(6, 3).includes("新継どおり"));
+      asserts.checkTrue("手を付けていないセルは要再確認を出さない（r5×A）", !at(4, 0).includes("要再確認"));
+      // 新型車日がLOより後のセルには同一性を出さない（比較元を選んでいても）
+      asserts.check("同一性を出さないセル（r3×C・r7×E）",
+        [at(2, 3).includes("同一性"), at(6, 5).includes("同一性")], [false, false]);
+      asserts.check("同一性が効くか（純関数）",
+        [samenessAffects(SEED.runs[2], SEED.regs[3]), samenessAffects(SEED.runs[6], SEED.regs[5]), samenessAffects(SEED.runs[6], SEED.regs[2])],
+        [false, false, true]);
       asserts.checkTrue("比較元の無い列に同一性は出ない", !at(3, 2).includes("同一性"));
     },
   },
