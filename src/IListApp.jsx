@@ -166,11 +166,20 @@ export function approachingNoticeFor(cellStatus, run, r) {
 // 優先順位（上に該当した状態を表示し、下の状態名は併記しない）：
 //   1. 人の判断＝対象外                   … 灰「対象外（判断済み）」
 //   2. 期日 > 今日                        … 橙「要対応｜{期日}まで」
-//   3. 期日 ≤ 今日、drop < 今日            … 灰「drop済み（対応対象外）」
-//   4. 期日 ≤ 今日、drop ≥ 今日、LO > 今日 … 橙「要対応｜{LO}まで」
-//   5. 期日 ≤ 今日、drop ≥ 今日、LO ≤ 今日 … 赤「法規不適合」（ドロップ当日はまだ生産中＝こちら）
+//   3. 期日 ≤ 今日、drop < 今日、期日 ≤ drop … 灰「過去に法規不適合（drop済み）」
+//   4. 期日 ≤ 今日、drop < 今日、期日 > drop … 灰「drop済み（対応対象外）」
+//   5. 期日 ≤ 今日、drop ≥ 今日、LO > 今日 … 橙「要対応｜{LO}まで」
+//   6. 期日 ≤ 今日、drop ≥ 今日、LO ≤ 今日 … 赤「法規不適合」（ドロップ当日はまだ生産中＝こちら）
 //
-// 4 について（2026-09-20 祥の判断で追加）：規制日を過ぎていても、ラインオフ（LO）が
+// 3・4 について（2026-09-20 祥の判断で追加）：要になったセルは要否の式から必ず「期日 ≤ drop」が成り立つ
+// （継続で要⇔継続車日≤drop、新型で要⇔新型車日≤LO≤drop）。つまりドロップ済みセルのほぼすべてが、
+// 「規制日が来たあともドロップまで生産を続け、その間ずっと実績が無かった」＝過去に不適合だった記録である。
+// これを「対応対象外」とだけ書くと、はじめから問題が無かったように読めてしまうため、事実を文言に残す。
+// 色は灰のまま（いまから手を打てる対象ではないので、赤い警告には含めない）。
+// 「期日 > drop」＝規制日が来る前にドロップしていた場合だけが、本当に何も起きなかったケースになる
+// （LO > drop のような不自然なデータでしか起きない）。判断できないときは事実を残す側（3）へ寄せる。
+//
+// 5 について（2026-09-20 祥の判断で追加）：規制日を過ぎていても、ラインオフ（LO）が
 // まだ来ていないランはまだ世に出ていないので「法規不適合」ではない。認可はLOまでに要るため、
 // 期限はLOで示す。LOを見るのは「期日を過ぎている」場合だけで、期日が先のセル（2）は従来どおり期日を示す。
 //
@@ -181,7 +190,7 @@ export function approachingNoticeFor(cellStatus, run, r) {
 // ───────────────────────────────────────────────
 export const ORANGE = "#ff9f43";   // 要対応（赤・黄とは別系統の橙）
 export const GRAY = "#9aabbd";     // drop済み・対象外（暗い背景でも読める灰）
-export const COMPLIANCE_STATES = ["対象外", "drop済み", "法規不適合", "要対応"];
+export const COMPLIANCE_STATES = ["対象外", "過去不適合", "drop済み", "法規不適合", "要対応"];
 
 export function complianceStateOf({ dueDate, drop, lo, decisionState, today = TODAY }) {
   if (decisionState === "対象外") return { state:"対象外", label:"対象外（判断済み）", color:GRAY };
@@ -191,7 +200,11 @@ export function complianceStateOf({ dueDate, drop, lo, decisionState, today = TO
   if (!passed) return { state:"要対応", label:`要対応｜${fmt(dueDate)}まで`, color:ORANGE };
   const dropDay = dateDayNumber(drop);
   if (dropDay !== null && todayDay !== null && dropDay < todayDay) {
-    return { state:"drop済み", label:"drop済み（対応対象外）", color:GRAY };
+    // 期日がドロップ日以前＝規制日を過ぎてもドロップまで生産を続けていた＝過去に不適合だった
+    const producedAfterDue = dueDay === null || dueDay <= dropDay;
+    return producedAfterDue
+      ? { state:"過去不適合", label:"過去に法規不適合（drop済み）", color:GRAY }
+      : { state:"drop済み", label:"drop済み（対応対象外）", color:GRAY };
   }
   const loDay = dateDayNumber(lo);
   if (loDay !== null && todayDay !== null && loDay > todayDay) {
@@ -1543,7 +1556,8 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
         申請発生のセルは、期日・LO・ドロップ日{judge && "・人の適用判断"}から
         <b style={{ color:RED }}>法規不適合</b>（期日が来ていて、LOも過ぎ、まだ生産中）／
         <b style={{ color:ORANGE }}>要対応｜YYYY/MMまで</b>（期日がこれから＝期日まで。期日は過ぎたがLOがまだ＝LOまで）／
-        <b style={{ color:GRAY }}>drop済み（対応対象外）</b>（期日が来ているが、すでにドロップ済み）
+        <b style={{ color:GRAY }}>過去に法規不適合（drop済み）</b>（規制日のあともドロップまで実績なしで生産していた）／
+        <b style={{ color:GRAY }}>drop済み（対応対象外）</b>（規制日が来る前にドロップしていた）
         {judge && <>／<b style={{ color:GRAY }}>対象外（判断済み）</b>（人が対象外と判断したセル）</>}
         に分けて表示します。ドロップ当日はまだ生産中として扱い、LOがまだのランは法規不適合にしません。
       </div>
