@@ -54,6 +54,8 @@ const shift = (days, from = LOCAL_TODAY) => {
 };
 const YESTERDAY = shift(-1), TODAY_D = shift(0), TOMORROW = shift(1);
 const LONG_AGO = shift(-3650), FAR = shift(3650);
+// LOがまだ来ていないランの例。翌日と必ず別の年月になるよう60日先にする（表示は YYYY/MM のため）。
+const LO_SOON = shift(60);
 const STAMP = `${TODAY_D} 10:00`;
 const fmt = (d) => d.replaceAll("-", "/").slice(0, 7);   // 画面表示（YYYY/MM）と同じ整形
 
@@ -72,12 +74,14 @@ const statesIn = (t) => t.match(STATE_RE) || [];
 //   DEMO-B drop=当日   … ドロップ当日（まだ生産中として扱う＝A4の境界）
 //   DEMO-C drop=前日   … ドロップ済み
 //   DEMO-D drop=将来   … 過去期日は実績ありで塞ぐ（実効ドロップを将来日にするため）
+//   DEMO-E LO=60日先   … まだラインオフしていない（法規不適合にしない＝2026-09-20 祥の判断）
 const BASE_DUMMY = {
   runs: [
     { key: "r401", typeId: "DEMO-A", gen: "PJ-A", sk: "継", lo: LONG_AGO, drop: FAR },
     { key: "r402", typeId: "DEMO-B", gen: "PJ-B", sk: "継", lo: LONG_AGO, drop: TODAY_D },
     { key: "r403", typeId: "DEMO-C", gen: "PJ-C", sk: "継", lo: LONG_AGO, drop: YESTERDAY },
     { key: "r404", typeId: "DEMO-D", gen: "PJ-D", sk: "継", lo: LONG_AGO, drop: FAR },
+    { key: "r405", typeId: "DEMO-E", gen: "PJ-E", sk: "継", lo: LO_SOON,  drop: FAR },
   ],
   regs: [
     { rid: "g401", id: "REG-PAST",   label: "ダミー法規（期日は前日）", shin: LONG_AGO, kei: YESTERDAY, parent: "" },
@@ -86,7 +90,7 @@ const BASE_DUMMY = {
   ],
   cert: { "DEMO-D": { "REG-PAST": "CK-D-PAST", "REG-TODAY": "CK-D-TODAY" } },
 };
-const COL = { r401: 0, r402: 1, r403: 2, r404: 3 };
+const COL = { r401: 0, r402: 1, r403: 2, r404: 3, r405: 4 };
 const ROW = { g401: 0, g402: 1, g403: 2 };
 
 // 人の適用判断つき。対象外が他の状態より優先されること（A5）を見るための3件＋対照1件。
@@ -108,18 +112,19 @@ const JUDGE_DUMMY = {
 };
 
 // 同一性（F-04）の行用。「同一でない」＝新型車日で判定させる。
-//   DEMO-W（drop=将来）… 新型車日が前日＝法規不適合、翌日＝要対応
+//   DEMO-V（LO=遠い将来）… 比較元。LOがまだ来ていない対照（期日は過去でも法規不適合にしない）
+//   DEMO-W（LO=当日・drop=将来）… 新型車日が前日＝法規不適合、翌日＝要対応
 //   DEMO-X（drop=前日）… 新型車日が前日＝drop済み
 const SAME_DUMMY = {
   runs: [
     { key: "r411", typeId: "DEMO-V", gen: "PJ-S", sk: "新", lo: FAR, drop: FAR },
-    { key: "r412", typeId: "DEMO-W", gen: "PJ-S", sk: "新", lo: FAR, drop: FAR },
+    { key: "r412", typeId: "DEMO-W", gen: "PJ-S", sk: "新", lo: TODAY_D, drop: FAR },
     { key: "r413", typeId: "DEMO-X", gen: "PJ-T", sk: "新", lo: YESTERDAY, drop: YESTERDAY },
     { key: "r414", typeId: "DEMO-Y", gen: "PJ-T", sk: "新", lo: YESTERDAY, drop: YESTERDAY },
   ],
   regs: [
-    { rid: "g411", id: "REG-S-PAST",   label: "ダミー法規（新型車日は前日）", shin: YESTERDAY, kei: FAR, parent: "" },
-    { rid: "g412", id: "REG-S-FUTURE", label: "ダミー法規（新型車日は翌日）", shin: TOMORROW,  kei: FAR, parent: "" },
+    { rid: "g411", id: "REG-S-PAST",   label: "ダミー法規（新型車日は前日）", shin: YESTERDAY, kei: FAR,      parent: "" },
+    { rid: "g412", id: "REG-S-FUTURE", label: "ダミー法規（新型車日は翌日）", shin: TOMORROW,  kei: TOMORROW, parent: "" },
   ],
   cert: {},
   bases: [
@@ -228,7 +233,8 @@ const SCENARIOS = [
     name: "期日・drop・人の適用判断だけで4状態へ一意に分類できる（境界日を含む）",
     expect: "complianceStateOf が 対象外＞drop済み＞法規不適合＞要対応 の順で1状態だけを返す。期日当日・drop当日は境界どおり。日付が読めないときは警告を弱めない側へ寄る",
     async run({ asserts }) {
-      const st = (dueDate, drop, decisionState) => complianceStateOf({ dueDate, drop, decisionState }).state;
+      // lo を省略した呼び出しは「もうLOを迎えている」扱い（警告を弱めない側）
+      const st = (dueDate, drop, decisionState, lo) => complianceStateOf({ dueDate, drop, lo, decisionState }).state;
       asserts.check("状態は4種", COMPLIANCE_STATES, ["対象外", "drop済み", "法規不適合", "要対応"]);
       // 期日の境界（≤今日）
       asserts.check("期日=前日・生産中", st(YESTERDAY, FAR), "法規不適合");
@@ -245,6 +251,16 @@ const SCENARIOS = [
       asserts.check("対象は状態を変えない", st(YESTERDAY, FAR, "対象"), "法規不適合");
       asserts.check("未確認は状態を変えない", st(YESTERDAY, YESTERDAY, "未確認"), "drop済み");
       asserts.check("判断なしも同じ", st(TOMORROW, FAR, undefined), "要対応");
+      // LO（ラインオフ）の境界。期日を過ぎていても、LOがまだのランは法規不適合にしない
+      asserts.check("LO=翌日（未到来）", st(YESTERDAY, FAR, undefined, TOMORROW), "要対応");
+      asserts.check("LO=当日（境界・到来済み）", st(YESTERDAY, FAR, undefined, TODAY_D), "法規不適合");
+      asserts.check("LO=前日（到来済み）", st(YESTERDAY, FAR, undefined, YESTERDAY), "法規不適合");
+      asserts.check("LO未到来でも期日が先なら期日を示す", complianceStateOf({ dueDate: TOMORROW, drop: FAR, lo: LO_SOON }).label, L_UPCOMING(TOMORROW));
+      asserts.check("LO未到来で期日が過去ならLOを示す", complianceStateOf({ dueDate: YESTERDAY, drop: FAR, lo: LO_SOON }).label, L_UPCOMING(LO_SOON));
+      asserts.check("LO未到来よりdrop済みが優先", st(YESTERDAY, YESTERDAY, undefined, TOMORROW), "drop済み");
+      asserts.check("LO未到来より人の対象外が優先", st(YESTERDAY, FAR, "対象外", TOMORROW), "対象外");
+      asserts.check("LOが空なら到来済み側", st(YESTERDAY, FAR, undefined, ""), "法規不適合");
+      asserts.check("LOが実在しない日付でも到来済み側", st(YESTERDAY, FAR, undefined, "2026-02-30"), "法規不適合");
       // 表示文言（ラベル）
       asserts.check("ラベル", [
         complianceStateOf({ dueDate: YESTERDAY, drop: FAR }).label,
@@ -261,9 +277,10 @@ const SCENARIOS = [
       const all = [];
       for (const d of [YESTERDAY, TODAY_D, TOMORROW, "", "2026-02-30"])
         for (const dr of [YESTERDAY, TODAY_D, TOMORROW, FAR, "", "2026-02-30"])
-          for (const j of [undefined, "未確認", "対象", "対象外"]) all.push(st(d, dr, j));
+          for (const l of [LONG_AGO, TODAY_D, TOMORROW, "", "2026-02-30"])
+            for (const j of [undefined, "未確認", "対象", "対象外"]) all.push(st(d, dr, j, l));
       asserts.check("全組み合わせが4状態のいずれか", all.every((x) => COMPLIANCE_STATES.includes(x)), true);
-      asserts.check("組み合わせ数", all.length, 5 * 6 * 4);
+      asserts.check("組み合わせ数", all.length, 5 * 6 * 5 * 4);
     },
   },
   {
@@ -280,19 +297,21 @@ const SCENARIOS = [
       asserts.checkTrue("DEMO-A×REG-PAST の行", /DEMO-A（PJ-A）\s*×\s*REG-PAST継続\s*法規不適合/.test(t));
       asserts.checkTrue("DEMO-B×REG-TODAY の行（drop当日でも赤）", /DEMO-B（PJ-B）\s*×\s*REG-TODAY継続\s*法規不適合/.test(t));
       asserts.check("赤で出す", rowStateColor(leakRow(c, "DEMO-A", L_VIOLATION)), "rgb(255, 107, 87)");
+      asserts.check("LOがまだのランは法規不適合にしない（対照）", statesIn(cellText(c, ROW.g401, COL.r405)), [L_UPCOMING(LO_SOON)]);
     },
   },
   {
     id: "A3-upcoming-orange",
     name: "期日がこれからのセルは、帳票セルとコンプラ漏れ一覧で橙の「要対応｜YYYY/MMまで」になる",
-    expect: "DEMO-A・DEMO-D × REG-FUTURE が 要対応｜翌日の年月まで。法規不適合は併記しない",
+    expect: "DEMO-A・DEMO-D・DEMO-E × REG-FUTURE が 要対応｜翌日の年月まで。法規不適合は併記しない",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, BASE_DUMMY);
-      asserts.check("2セルとも要対応",
-        [["r401", "g403"], ["r404", "g403"]].map(([k, g]) => statesIn(cellText(c, ROW[g], COL[k]))),
-        [[L_UPCOMING(TOMORROW)], [L_UPCOMING(TOMORROW)]]);
+      asserts.check("3セルとも要対応（期日を示す）",
+        [["r401", "g403"], ["r404", "g403"], ["r405", "g403"]].map(([k, g]) => statesIn(cellText(c, ROW[g], COL[k]))),
+        [[L_UPCOMING(TOMORROW)], [L_UPCOMING(TOMORROW)], [L_UPCOMING(TOMORROW)]]);
+      asserts.checkTrue("LOが先でも、期日が先ならLOではなく期日を示す", cellText(c, ROW.g403, COL.r405).includes(L_UPCOMING(TOMORROW)));
       const t = cardText(c, LEAKS);
-      asserts.check("コンプラ漏れにも2件", (t.match(/要対応｜/g) || []).length, 2);
+      asserts.check("コンプラ漏れの要対応は5件（期日3・LO2）", (t.match(/要対応｜/g) || []).length, 5);
       asserts.checkTrue("DEMO-A×REG-FUTURE の行", t.includes(`DEMO-A（PJ-A） × REG-FUTURE継続 ${L_UPCOMING(TOMORROW)}`));
       asserts.check("橙で出す", rowStateColor(leakRow(c, "DEMO-A", "要対応｜")), "rgb(255, 159, 67)");
     },
@@ -310,6 +329,31 @@ const SCENARIOS = [
       const t = cardText(c, LEAKS);
       asserts.check("コンプラ漏れにも1件", (t.match(/drop済み（対応対象外）/g) || []).length, 1);
       asserts.checkTrue("DEMO-C×REG-PAST の行", /DEMO-C（PJ-C）\s*×\s*REG-PAST継続\s*drop済み（対応対象外）/.test(t));
+    },
+  },
+  {
+    id: "LO-before-lineoff",
+    name: "LO（ラインオフ）がまだ来ていないランは、期日を過ぎていても法規不適合にしない",
+    expect: "DEMO-E（LO=60日先）の過去期日セルが、帳票セル・コンプラ漏れ一覧で橙の「要対応｜LOの年月まで」になる。同一性の行でも同じ",
+    async run({ mount, asserts }) {
+      // 2026-09-20 祥の判断：まだ世に出ていない車を「法規不適合」と呼ばない。期限はLOで示す。
+      const c = await mountWith(mount, BASE_DUMMY);
+      asserts.check("期日=前日・当日の2セルとも 要対応｜LOまで",
+        [["r405", "g401"], ["r405", "g402"]].map(([k, g]) => statesIn(cellText(c, ROW[g], COL[k]))),
+        [[L_UPCOMING(LO_SOON)], [L_UPCOMING(LO_SOON)]]);
+      asserts.check("同じ期日でもLOが過ぎているランは法規不適合（対照）",
+        [["r401", "g401"], ["r401", "g402"]].map(([k, g]) => statesIn(cellText(c, ROW[g], COL[k]))),
+        [[L_VIOLATION], [L_VIOLATION]]);
+      asserts.checkTrue("申請発生の表示は残る（A9）", cellText(c, ROW.g401, COL.r405).includes("申請発生"));
+      const t = cardText(c, LEAKS);
+      asserts.checkTrue("コンプラ漏れにも出る", t.includes(`DEMO-E（PJ-E） × REG-PAST継続 ${L_UPCOMING(LO_SOON)}`));
+      asserts.check("橙で出す（灰にはしない）", rowStateColor(leakRow(c, "DEMO-E", L_UPCOMING(LO_SOON))), "rgb(255, 159, 67)");
+      asserts.check("型式名は灰色にしない", rowTypeColor(leakRow(c, "DEMO-E", L_UPCOMING(LO_SOON))), "rgb(238, 244, 250)");
+      // 同一性の行でも同じ（DEMO-V は LO=遠い将来、新型車日は前日）
+      const cs = await mountWith(mount, SAME_DUMMY);
+      asserts.check("同一性の行がある列でも法規不適合にしない",
+        statesIn(cellText(cs, SROW.g411, SCOL.r412)), [L_VIOLATION, L_VIOLATION]);
+      asserts.check("比較元（LO未到来）の帳票セル", statesIn(cellText(cs, SROW.g411, SCOL.r411)), [L_UPCOMING(FAR)]);
     },
   },
   {
@@ -332,13 +376,14 @@ const SCENARIOS = [
   {
     id: "A6-leak-list-keeps-rows",
     name: "コンプラ漏れ一覧は drop済み・対象外の行を除外せず、灰色の行として残す",
-    expect: "判断なしでも判断ありでも一覧は7件。drop済み・対象外の行が残り、型式名・法規名が灰色で出る",
+    expect: "判断なしでも判断ありでも一覧は10件。drop済み・対象外の行が残り、型式名・法規名が灰色で出る",
     async run({ mount, asserts }) {
       const cBase = await mountWith(mount, BASE_DUMMY);
       const tBase = cardText(cBase, LEAKS);
-      asserts.check("判断なしの件数（法規不適合4・要対応2・drop済み1）",
-        [4, 2, 1].map((n, i) => (tBase.match([/法規不適合/g, /要対応｜/g, /drop済み（対応対象外）/g][i]) || []).length),
-        [4, 2, 1]);
+      asserts.check("判断なしの一覧は10件", summarize(BASE_DUMMY.runs, BASE_DUMMY.regs, BASE_DUMMY.cert).leaks.length, 10);
+      asserts.check("判断なしの件数（法規不適合4・要対応5・drop済み1）",
+        [/法規不適合/g, /要対応｜/g, /drop済み（対応対象外）/g].map((re) => (tBase.match(re) || []).length),
+        [4, 5, 1]);
       asserts.check("drop済みの行は灰色（型式名・状態名）",
         [rowTypeColor(leakRow(cBase, "DEMO-C", L_DROPPED)), rowStateColor(leakRow(cBase, "DEMO-C", L_DROPPED))],
         ["rgb(154, 171, 189)", "rgb(154, 171, 189)"]);
@@ -347,11 +392,11 @@ const SCENARIOS = [
       const cJudge = await mountWith(mount, JUDGE_DUMMY);
       const tJudge = cardText(cJudge, LEAKS);
       asserts.check("判断ありでも件数は同じ（除外しない）",
-        summarize(JUDGE_DUMMY.runs, JUDGE_DUMMY.regs, JUDGE_DUMMY.cert).leaks.length, 7);
-      // 7件の内訳：対象外3（r401×PAST・r401×FUTURE・r403×PAST）／法規不適合3／要対応1（r404×FUTURE）
-      asserts.check("対象外3件・法規不適合3件・要対応1件・drop済み0件",
+        summarize(JUDGE_DUMMY.runs, JUDGE_DUMMY.regs, JUDGE_DUMMY.cert).leaks.length, 10);
+      // 10件の内訳：対象外3（r401×PAST・r401×FUTURE・r403×PAST）／法規不適合3／要対応4／drop済み0
+      asserts.check("対象外3件・法規不適合3件・要対応4件・drop済み0件",
         [/対象外（判断済み）/g, /法規不適合/g, /要対応｜/g, /drop済み（対応対象外）/g].map((re) => (tJudge.match(re) || []).length),
-        [3, 3, 1, 0]);
+        [3, 3, 4, 0]);
       asserts.checkTrue("DEMO-C の行は残っている", tJudge.includes("DEMO-C（PJ-C）"));
       asserts.check("対象外の行は灰色（型式名・状態名）",
         [rowTypeColor(leakRow(cJudge, "DEMO-A", L_EXEMPT)), rowStateColor(leakRow(cJudge, "DEMO-A", L_EXEMPT))],
@@ -369,6 +414,7 @@ const SCENARIOS = [
       asserts.check("DEMO-W×前日", statesIn(cell("r412", "g411")), [L_VIOLATION, L_VIOLATION]);
       asserts.check("DEMO-W×翌日", statesIn(cell("r412", "g412")), [L_UPCOMING(TOMORROW), L_UPCOMING(TOMORROW)]);
       asserts.check("DEMO-X×前日（drop前日）", statesIn(cell("r413", "g411")), [L_DROPPED, L_DROPPED]);
+      asserts.check("DEMO-V（LO未到来）×前日は法規不適合にしない", statesIn(cell("r411", "g411")), [L_UPCOMING(FAR)]);
       asserts.check("同一性の行が出ていること", ["r412", "r413"].map((k) => cell(k, "g411").includes("同一性：同一でない")), [true, true]);
       asserts.check("「期限超過」はどこにも出さない",
         [["r411", "g411"], ["r412", "g411"], ["r412", "g412"], ["r413", "g411"], ["r414", "g411"]]
@@ -384,9 +430,10 @@ const SCENARIOS = [
     async run({ mount, asserts }) {
       const c = await mountWith(mount, BASE_DUMMY);
       asserts.check("実効日（純関数）", summarize(BASE_DUMMY.runs, BASE_DUMMY.regs, BASE_DUMMY.cert).effDrop,
-        { r401: YESTERDAY, r402: YESTERDAY, r403: YESTERDAY, r404: TOMORROW });
+        { r401: YESTERDAY, r402: YESTERDAY, r403: YESTERDAY, r404: TOMORROW, r405: YESTERDAY });
       const t = cardText(c, EFFDROP);
-      asserts.check("既発効は3件", (t.match(/既発効/g) || []).length, 3);
+      asserts.check("既発効は4件", (t.match(/既発効/g) || []).length, 4);
+      asserts.checkTrue("LOがまだのDEMO-Eも従来どおり既発効", /DEMO-E（PJ-E）\s*実効 既発効/.test(t));
       asserts.checkTrue("DEMO-A は既発効", /DEMO-A（PJ-A）\s*実効 既発効/.test(t));
       asserts.checkTrue("DEMO-D は翌日の日付表示", t.includes(`DEMO-D（PJ-D） 実効 ${fmt(TOMORROW)}`));
       asserts.check("4状態の文言は出さない", statesIn(t), []);
@@ -423,19 +470,19 @@ const SCENARIOS = [
   {
     id: "A10-api-and-standalone",
     name: "API版・単体HTML版で同じ状態表示になる",
-    expect: "同じダミーデータで、帳票セル12個の状態表示とコンプラ漏れ一覧の状態が完全に一致する",
+    expect: "同じダミーデータで、帳票セル15個の状態表示とコンプラ漏れ一覧の状態が完全に一致する",
     async run({ mount, mountApi, asserts }) {
       const cs = await mountWith(mount, BASE_DUMMY);
       const api = installApiMock(clone({ runs: BASE_DUMMY.runs, regs: BASE_DUMMY.regs, cert: BASE_DUMMY.cert }));
       try {
         const ca = mountApi().container;
         await sleep(160);
-        const grid = (c) => [0, 1, 2].map((r) => [0, 1, 2, 3].map((k) => statesIn(cellText(c, r, k)).join("")));
+        const grid = (c) => [0, 1, 2].map((r) => [0, 1, 2, 3, 4].map((k) => statesIn(cellText(c, r, k)).join("")));
         const sa = grid(cs), aa = grid(ca);
         asserts.check("単体版の状態（行＝法規、列＝型式ラン）", sa, [
-          [L_VIOLATION, L_VIOLATION, L_DROPPED, ""],
-          [L_VIOLATION, L_VIOLATION, "", ""],
-          [L_UPCOMING(TOMORROW), "", "", L_UPCOMING(TOMORROW)],
+          [L_VIOLATION, L_VIOLATION, L_DROPPED, "", L_UPCOMING(LO_SOON)],
+          [L_VIOLATION, L_VIOLATION, "", "", L_UPCOMING(LO_SOON)],
+          [L_UPCOMING(TOMORROW), "", "", L_UPCOMING(TOMORROW), L_UPCOMING(TOMORROW)],
         ]);
         asserts.check("API版も同じ", aa, sa);
         asserts.check("コンプラ漏れ一覧も同じ", statesIn(cardText(ca, LEAKS)), statesIn(cardText(cs, LEAKS)));

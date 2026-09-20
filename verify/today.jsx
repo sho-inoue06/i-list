@@ -92,16 +92,18 @@ const EFF_DUMMY = {
 };
 
 // 同一性（F-04）の行用。「同一でない」＝新型車日で判定させ、新型車日を 前日／当日／翌日 にする。
-// LOを遠い将来にして 新型車日 ≤ LO を必ず満たす＝ kind は常に「新型」、期日＝shin。
+// LOは当日にする：新型車日 ≤ LO を満たす前日・当日は kind「新型」で期日＝shin、
+// 翌日の行は継続車日（翌日）で要になる。どちらも期日は前日／当日／翌日のまま。
+// （F-14で、LOがまだ来ていないランは法規不適合にしない扱いになったため、LOを将来日にしない。）
 const SAME_DUMMY = {
   runs: [
-    { key: "r321", typeId: "DEMO-V", gen: "PJ-9", sk: "新", lo: FAR, drop: FAR },
-    { key: "r322", typeId: "DEMO-W", gen: "PJ-9", sk: "新", lo: FAR, drop: FAR },
+    { key: "r321", typeId: "DEMO-V", gen: "PJ-9", sk: "新", lo: TODAY_D, drop: FAR },
+    { key: "r322", typeId: "DEMO-W", gen: "PJ-9", sk: "新", lo: TODAY_D, drop: FAR },
   ],
   regs: [
-    { rid: "g321", id: "REG-S-PAST",     label: "ダミー法規（新型車日は前日）", shin: YESTERDAY, kei: FAR, parent: "" },
-    { rid: "g322", id: "REG-S-TODAY",    label: "ダミー法規（新型車日は当日）", shin: TODAY_D,   kei: FAR, parent: "" },
-    { rid: "g323", id: "REG-S-TOMORROW", label: "ダミー法規（新型車日は翌日）", shin: TOMORROW,  kei: FAR, parent: "" },
+    { rid: "g321", id: "REG-S-PAST",     label: "ダミー法規（新型車日は前日）", shin: YESTERDAY, kei: FAR,      parent: "" },
+    { rid: "g322", id: "REG-S-TODAY",    label: "ダミー法規（新型車日は当日）", shin: TODAY_D,   kei: FAR,      parent: "" },
+    { rid: "g323", id: "REG-S-TOMORROW", label: "ダミー法規（期日は翌日）",     shin: TOMORROW,  kei: TOMORROW, parent: "" },
   ],
   cert: {},
   bases: [{ runKey: "r322", baseRunKey: "r321", decidedAt: STAMP }],
