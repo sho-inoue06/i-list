@@ -624,7 +624,7 @@ const SCENARIOS = [
   {
     id: "S-seed-demo",
     name: "単体版の初期表示（SEED）が検討用の各ケースを出す",
-    expect: "SEEDは検証を通り、開いた直後は『変更なし』。000Bで型式追加、000Cで同一でない・過去に法規不適合（drop済み）、LO≥継続車日が見える。新型車日がLOより後の2セル（r3×C・r7×E）には同一性を出さない",
+    expect: "SEEDは検証を通り、開いた直後は『変更なし』。000Bで型式追加、000Cで同一でない・過去に法規不適合（drop済み）、LO≥継続車日、001Aで初回回答と未確認に戻した要再確認が見える。新型車日がLOより後のセルには同一性を出さない",
     async run({ mount, asserts }) {
       const p = parseImportedData(clone(SEED));
       asserts.check("SEEDはそのまま読込検証を通る", p.ok, true);
@@ -642,18 +642,18 @@ const SCENARIOS = [
       asserts.checkTrue("r5×B 同一でない→新型車日で過去に法規不適合",
         at(4, 2).includes("新型車日を適用") && at(4, 2).includes("過去に法規不適合（drop済み）") && !at(4, 2).includes("期限超過"));
       asserts.checkTrue("r5×D LO≥継続車日：要再確認なし・実績あり", !at(4, 4).includes("要再確認") && at(4, 4).includes("DEMO*D00/00*02"));
-      // r3×C・r7×E は新型車日がLOより後のセル。2026-09-20の判断で同一性の行を出さなくなった
-      // （答えても結論が変わらないため）。保存された回答・要再確認はデータには残っている。
-      asserts.checkTrue("r3×C 新型車日(2025/01)>LO(2021/04)：同一性を出さない", !at(2, 3).includes("同一性"));
-      asserts.check("記録としては残っている（r3×C）",
-        [findSame(SEED, "r3", "g4").value, findSame(SEED, "r3", "g4").needsRecheck], ["未確認", true]);
-      asserts.checkTrue("r7×E 新型車日(2028/01)>LO(2027/01)：同一性を出さない", !at(6, 5).includes("同一性"));
-      asserts.check("記録としては残っている（r7×E）",
-        [findSame(SEED, "r7", "g6").value, findSame(SEED, "r7", "g6").needsRecheck], ["同一でない", true]);
+      // 要再確認の例は「同一性が効くセル」へ置いてある（r7×B・r7×C）
+      asserts.checkTrue("r7×B 初回回答：要再確認・新型車日を適用",
+        at(6, 2).includes("同一性：同一でない") && at(6, 2).includes("要再確認") && at(6, 2).includes("新型車日を適用"));
+      asserts.checkTrue("r7×C 未確認に戻した：要再確認・新継どおり",
+        at(6, 3).includes("同一性：未確認") && at(6, 3).includes("要再確認") && at(6, 3).includes("新継どおり"));
+      asserts.checkTrue("手を付けていないセルは要再確認を出さない（r5×A）", !at(4, 0).includes("要再確認"));
+      // 新型車日がLOより後のセルには同一性を出さない（比較元を選んでいても）
+      asserts.check("同一性を出さないセル（r3×C・r7×E）",
+        [at(2, 3).includes("同一性"), at(6, 5).includes("同一性")], [false, false]);
       asserts.check("同一性が効くか（純関数）",
-        [samenessAffects(SEED.runs[2], SEED.regs[3]), samenessAffects(SEED.runs[6], SEED.regs[5]), samenessAffects(SEED.runs[6], SEED.regs[3])],
+        [samenessAffects(SEED.runs[2], SEED.regs[3]), samenessAffects(SEED.runs[6], SEED.regs[5]), samenessAffects(SEED.runs[6], SEED.regs[2])],
         [false, false, true]);
-      asserts.checkTrue("r7×C 未確認：新継どおり", at(6, 3).includes("新継どおり"));
       asserts.checkTrue("比較元の無い列に同一性は出ない", !at(3, 2).includes("同一性"));
     },
   },

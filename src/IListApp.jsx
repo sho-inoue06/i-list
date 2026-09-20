@@ -59,11 +59,11 @@ export const SEED = {
   //   r3×B 同一       … 継続車日を借りて「否」（新継どおりなら新型車日で期日到来）
   //   r5×B 同一でない … 000Cで装置変更。新型車日（過去）で申請発生（dropも過去なので drop済み 表示）
   //   r5×D 同一でない … LO≥継続車日なので結論は変わらず、要再確認も立たない（実績ありで緑。実績ありのセルは要再確認を出さない）
-  //   r3×C 未確認     … 同一から未確認へ戻した例。※新型車日(2025/01)がLO(2021/04)より後のため、
-  //                      いまは同一性の行を出さない（答えても結論が変わらないセル）。記録としては残っている
-  //   r7×E 同一でない … 初回回答で要再確認が立った例。※新型車日(2028/01)がLO(2027/01)より後のため、
-  //                      いまは同一性の行を出さない（答えても継続車日で要になるだけのセル）。記録としては残っている
-  //   r7×C 未確認     … 手を付けていない例（同一と答えると期日が変わる）
+  //   r7×B 同一でない … 初回回答で要再確認が立った例（同一と答えると継続車日2027/01へ、期日が変わる）
+  //   r7×C 未確認     … 同一から未確認へ戻した例。実績が無いので要再確認が残っている
+  //   記録を持たないセル（r3×A・r5×A・r7×A など）… 手を付けていない例。同一性：未確認・要再確認なし
+  // ※ 同一性の行は「新型車日 ≤ LO」のセルにしか出ない（答えても結論が変わらないセルには出さない）。
+  //    000BのC・E、000CのA2・C・E、001AのE などは、比較元を選んでいても同一性の行が出ない。
   bases:[
     {runKey:"r3",baseRunKey:"r2",decidedAt:"2026-09-19 10:00"},
     {runKey:"r5",baseRunKey:"r4",decidedAt:"2026-09-19 10:00"},
@@ -73,8 +73,8 @@ export const SEED = {
     {runKey:"r3",rid:"g3",value:"同一",reason:"ダミー：比較元と装置は同じ",decidedAt:"2026-09-19 10:05",needsRecheck:false,baseRunKey:"r2"},
     {runKey:"r5",rid:"g3",value:"同一でない",reason:"ダミー：000Cで装置を変更",decidedAt:"2026-09-19 10:06",needsRecheck:false,baseRunKey:"r4"},
     {runKey:"r5",rid:"g5",value:"同一でない",reason:"ダミー：LO≥継続車日なので結論は変わらない",decidedAt:"2026-09-19 10:07",needsRecheck:false,baseRunKey:"r4"},
-    {runKey:"r3",rid:"g4",value:"未確認",reason:"ダミー：確認し直すため未確認に戻した",decidedAt:"",needsRecheck:true,baseRunKey:""},
-    {runKey:"r7",rid:"g6",value:"同一でない",reason:"ダミー：初回の回答",decidedAt:"2026-09-19 10:08",needsRecheck:true,baseRunKey:"r6"},
+    {runKey:"r7",rid:"g3",value:"同一でない",reason:"ダミー：初回の回答",decidedAt:"2026-09-19 10:08",needsRecheck:true,baseRunKey:"r6"},
+    {runKey:"r7",rid:"g4",value:"未確認",reason:"ダミー：確認し直すため未確認に戻した",decidedAt:"",needsRecheck:true,baseRunKey:""},
   ],
 };
 
