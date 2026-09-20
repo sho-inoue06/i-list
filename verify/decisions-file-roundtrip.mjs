@@ -161,7 +161,12 @@ const boot = await ev(`JSON.parse(document.getElementById('ilist-boot-data').tex
 compare("保存版を開いたDOMの起動データ", boot);
 check("保存版で要再確認2件を描画", await ev(`[...document.querySelectorAll('table tbody td')].filter(td => td.textContent.includes('要再確認')).length`), 2);
 check("保存版で比較元を見出しに描画", await ev(`[...document.querySelectorAll('table thead th')].some(th => th.textContent.includes('比較元 DEMO-ROUNDTRIP-BASE'))`), true);
-check("保存版で同一でない→期限超過を描画", await ev(`[...document.querySelectorAll('table tbody td')].filter(td => td.textContent.includes('期限超過')).length`), 1);
+// F-14：期日超過の表示は「法規不適合／要対応｜〜／drop済み／対象外」の4状態になった。
+// このセル（r101×g102）は人の判断が「対象外」なので、他の状態より優先して灰の対象外が出る。
+// 日付に依らない期待値だけを見る（このダミーの日付は固定値のため）。
+check("保存版で人の対象外が最優先で描画", await ev(`[...document.querySelectorAll('table tbody td')].filter(td => td.textContent.includes('対象外（判断済み）')).length`), 1);
+check("保存版のセルに法規不適合を出さない（対象外が優先）", await ev(`[...document.querySelectorAll('table tbody td')].filter(td => td.textContent.includes('対象外（判断済み）') && td.textContent.includes('法規不適合')).length`), 0);
+check("保存版に「期限超過」は無い（F-14で廃止）", await ev(`document.body.textContent.includes('期限超過')`), false);
 check("HTML風理由のスクリプト実行なし", await ev("window.__PWNED__ === undefined"), true);
 const afterHTML = await download("JSONに書き出し", ".json");
 compare("保存版起動後のJSON再書出し", JSON.parse(readFileSync(afterHTML, "utf8")));

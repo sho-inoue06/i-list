@@ -59,9 +59,11 @@ const STAMP = `${TODAY_D} 10:00`;        // 確定日時も実行時の今日か
 
 // ── ダミーデータ（架空。実車・実法規・実認可番号とは無関係） ──
 // 継続ランだけを使い、継続車日（kei）＝期日が 前日／当日／翌日／来年 になる4行を作る。
-//   A2：前日 → 既発効・即対応（期限超過）
+//   A2：前日 → 期日到来（F-14の状態表示では「法規不適合」。ドロップ日は将来＝生産中のため）
 //   A4：当日 → 前日と同じ扱い
-//   A3：翌日・来年 → 従来どおり「YYYY/MMまでに」
+//   A3：翌日・来年 → 将来日（F-14の状態表示では「要対応｜YYYY/MMまで」）
+// ※ 表示の文言は F-14（期日超過の4状態）で置き換わった。ここで確かめるのは
+//   「今日」の決め方と境界（前日・当日・翌日）であり、F-13のA1〜A8の意味は変えていない。
 const KEI_DUMMY = {
   runs: [
     { key: "r301", typeId: "DEMO-S", gen: "PJ-1", sk: "継", lo: LONG_AGO, drop: FAR },
@@ -207,31 +209,31 @@ const SCENARIOS = [
   },
   {
     id: "A2A3A4-matrix-cell",
-    name: "帳票セル：期日が前日・当日なら既発効・即対応、翌日以降は従来どおり「〜までに」",
-    expect: "前日・当日の行は「既発効・即対応」、翌日・来年の行は「YYYY/MMまでに」。いずれも申請発生のまま",
+    name: "帳票セル：期日が前日・当日なら期日到来、翌日以降は将来日の表示（文言はF-14の4状態）",
+    expect: "前日・当日の行は「法規不適合」、翌日・来年の行は「要対応｜YYYY/MMまで」。いずれも申請発生のまま",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, KEI_DUMMY);
-      asserts.checkTrue("前日は既発効・即対応", cellText(c, 0, 0).includes("既発効・即対応"));
-      asserts.checkTrue("当日も既発効・即対応（A4）", cellText(c, 1, 0).includes("既発効・即対応"));
-      asserts.checkTrue("翌日は従来どおり〜までに", cellText(c, 2, 0).includes(`${fmt(TOMORROW)}までに`));
-      asserts.checkTrue("翌日は既発効と出さない", !cellText(c, 2, 0).includes("既発効"));
-      asserts.checkTrue("来年も〜までに", cellText(c, 3, 0).includes(`${fmt(NEXT_YEAR)}までに`));
+      asserts.checkTrue("前日は期日到来（法規不適合）", cellText(c, 0, 0).includes("法規不適合"));
+      asserts.checkTrue("当日も期日到来（A4）", cellText(c, 1, 0).includes("法規不適合"));
+      asserts.checkTrue("翌日は将来日のまま", cellText(c, 2, 0).includes(`要対応｜${fmt(TOMORROW)}まで`));
+      asserts.checkTrue("翌日は期日到来にしない", !cellText(c, 2, 0).includes("法規不適合"));
+      asserts.checkTrue("来年も将来日のまま", cellText(c, 3, 0).includes(`要対応｜${fmt(NEXT_YEAR)}まで`));
       asserts.check("4行とも申請発生のまま（A5）",
         [0, 1, 2, 3].map((r) => cellText(c, r, 0).includes("申請発生")), [true, true, true, true]);
     },
   },
   {
     id: "A2A3A4-leak-list",
-    name: "コンプラ漏れ一覧：期日が前日・当日なら既発効・即対応、翌日以降は「〜までに」",
-    expect: "一覧に4件出て、前日・当日が既発効・即対応、翌日・来年が YYYY/MMまでに",
+    name: "コンプラ漏れ一覧：期日が前日・当日なら期日到来、翌日以降は将来日（文言はF-14の4状態）",
+    expect: "一覧に4件出て、前日・当日が法規不適合、翌日・来年が 要対応｜YYYY/MMまで",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, KEI_DUMMY);
       const t = cardText(c, "コンプラ漏れ（自動検出）");
-      asserts.check("既発効・即対応は2件（前日・当日）", (t.match(/既発効・即対応/g) || []).length, 2);
-      asserts.checkTrue("REG-PAST は既発効・即対応", /REG-PAST継続\s*既発効・即対応/.test(t));
-      asserts.checkTrue("REG-TODAY は既発効・即対応（A4）", /REG-TODAY継続\s*既発効・即対応/.test(t));
-      asserts.checkTrue("REG-TOMORROW は〜までに", t.includes(`REG-TOMORROW継続 ${fmt(TOMORROW)}までに`));
-      asserts.checkTrue("REG-NEXTYEAR は〜までに", t.includes(`REG-NEXTYEAR継続 ${fmt(NEXT_YEAR)}までに`));
+      asserts.check("法規不適合は2件（前日・当日）", (t.match(/法規不適合/g) || []).length, 2);
+      asserts.checkTrue("REG-PAST は法規不適合", /REG-PAST継続\s*法規不適合/.test(t));
+      asserts.checkTrue("REG-TODAY は法規不適合（A4）", /REG-TODAY継続\s*法規不適合/.test(t));
+      asserts.checkTrue("REG-TOMORROW は要対応", t.includes(`REG-TOMORROW継続 要対応｜${fmt(TOMORROW)}まで`));
+      asserts.checkTrue("REG-NEXTYEAR は要対応", t.includes(`REG-NEXTYEAR継続 要対応｜${fmt(NEXT_YEAR)}まで`));
     },
   },
   {
@@ -252,18 +254,21 @@ const SCENARIOS = [
   },
   {
     id: "A2A3A4-sameness-overdue",
-    name: "同一性の行：同一でないで新型車日が前日・当日なら期限超過、翌日は出ない",
-    expect: "DEMO-W の3セルで、前日・当日に「期限超過」が付き、翌日には付かない",
+    name: "同一性の行：同一でないで新型車日が前日・当日なら法規不適合、翌日は要対応（F-14で「期限超過」は廃止）",
+    expect: "DEMO-W の3セルで、前日・当日が法規不適合、翌日が要対応。どのセルにも「期限超過」は出ない",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, SAME_DUMMY);
       const col = 1;   // DEMO-W（比較元を選んだ側）
-      asserts.checkTrue("前日は期限超過", cellText(c, 0, col).includes("期限超過"));
-      asserts.checkTrue("当日も期限超過（A4）", cellText(c, 1, col).includes("期限超過"));
-      asserts.checkTrue("翌日は期限超過にしない", !cellText(c, 2, col).includes("期限超過"));
+      asserts.checkTrue("前日は法規不適合", cellText(c, 0, col).includes("法規不適合"));
+      asserts.checkTrue("当日も法規不適合（A4）", cellText(c, 1, col).includes("法規不適合"));
+      asserts.checkTrue("翌日は法規不適合にしない", !cellText(c, 2, col).includes("法規不適合"));
+      asserts.checkTrue("翌日は要対応", cellText(c, 2, col).includes(`要対応｜${fmt(TOMORROW)}まで`));
+      asserts.check("3セルとも「期限超過」を使わない",
+        [0, 1, 2].map((r) => cellText(c, r, col).includes("期限超過")), [false, false, false]);
       asserts.check("3セルとも同一性：同一でない のまま",
         [0, 1, 2].map((r) => cellText(c, r, col).includes("同一でない")), [true, true, true]);
-      asserts.check("比較元を選んでいない列には期限超過を出さない",
-        [0, 1, 2].map((r) => cellText(c, r, 0).includes("期限超過")), [false, false, false]);
+      asserts.check("比較元を選んでいない列には同一性の行そのものが出ない",
+        [0, 1, 2].map((r) => cellText(c, r, 0).includes("同一性")), [false, false, false]);
     },
   },
   {
@@ -286,7 +291,7 @@ const SCENARIOS = [
       asserts.check("遠い過去でも同じ日数で予告",
         approachingNoticeFor("off", { ...run, drop: shift(-3650) }, { ...near, kei: shift(-3640) }), { days: 10, keiDate: shift(-3640) });
       asserts.check("申請発生のセルには予告を出さない（従来どおり）", approachingNoticeFor("leak", offRun, near), null);
-      // 同一性の要再確認は期日と無関係（期限超過が出るセルでも出ないセルでも同じ）
+      // 同一性の要再確認は期日と無関係（法規不適合が出るセルでも出ないセルでも同じ）
       const c = await mountWith(mount, SAME_DUMMY);
       asserts.check("3セルとも要再確認なしのまま",
         [0, 1, 2].map((r) => cellText(c, r, 1).includes("要再確認")), [false, false, false]);
@@ -295,7 +300,7 @@ const SCENARIOS = [
   {
     id: "A6-api-and-standalone",
     name: "API版・単体HTML版で同じ「今日」を使う",
-    expect: "同じダミーデータで、両方の帳票セルが前日・当日＝既発効・即対応、翌日＝〜までに で一致する",
+    expect: "同じダミーデータで、両方の帳票セルが前日・当日＝法規不適合、翌日＝要対応 で一致する",
     async run({ mount, mountApi, asserts }) {
       const cs = await mountWith(mount, KEI_DUMMY);
       const api = installApiMock(clone({ runs: KEI_DUMMY.runs, regs: KEI_DUMMY.regs, cert: KEI_DUMMY.cert }));
@@ -304,10 +309,10 @@ const SCENARIOS = [
         ca = mountApi().container;
         await sleep(120);
         // 期日の表示だけを抜き出して比べる（列の他の文言に影響されないため）
-        const DUE = /既発効・即対応|\d{4}\/\d{2}までに/;
+        const DUE = /法規不適合|要対応｜\d{4}\/\d{2}まで/;
         const read = (c) => [0, 1, 2, 3].map((r) => (cellText(c, r, 0).match(DUE) || [""])[0]);
         const sa = read(cs), aa = read(ca);
-        asserts.check("単体版の4行", sa, ["既発効・即対応", "既発効・即対応", `${fmt(TOMORROW)}までに`, `${fmt(NEXT_YEAR)}までに`]);
+        asserts.check("単体版の4行", sa, ["法規不適合", "法規不適合", `要対応｜${fmt(TOMORROW)}まで`, `要対応｜${fmt(NEXT_YEAR)}まで`]);
         asserts.check("API版も同じ", aa, sa);
       } finally {
         api.restore();
