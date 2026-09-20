@@ -164,35 +164,45 @@ export function approachingNoticeFor(cellStatus, run, r) {
 // 人の「対象外」がここで効くのは、この状態表示だけに限る（セルの色・要否・集計には関与しない）。
 //
 // 優先順位（上に該当した状態を表示し、下の状態名は併記しない）：
-//   1. 人の判断＝対象外        … 灰「対象外（判断済み）」
-//   2. 期日 ≤ 今日、drop < 今日 … 灰「drop済み（対応対象外）」
-//   3. 期日 ≤ 今日、drop ≥ 今日 … 赤「法規不適合」（ドロップ当日はまだ生産中＝こちら）
-//   4. 期日 > 今日             … 橙「要対応｜YYYY/MMまで」
+//   1. 人の判断＝対象外                   … 灰「対象外（判断済み）」
+//   2. 期日 > 今日                        … 橙「要対応｜{期日}まで」
+//   3. 期日 ≤ 今日、drop < 今日            … 灰「drop済み（対応対象外）」
+//   4. 期日 ≤ 今日、drop ≥ 今日、LO > 今日 … 橙「要対応｜{LO}まで」
+//   5. 期日 ≤ 今日、drop ≥ 今日、LO ≤ 今日 … 赤「法規不適合」（ドロップ当日はまだ生産中＝こちら）
+//
+// 4 について（2026-09-20 祥の判断で追加）：規制日を過ぎていても、ラインオフ（LO）が
+// まだ来ていないランはまだ世に出ていないので「法規不適合」ではない。認可はLOまでに要るため、
+// 期限はLOで示す。LOを見るのは「期日を過ぎている」場合だけで、期日が先のセル（2）は従来どおり期日を示す。
 //
 // 日付が読めないとき（欠落・不正形式・実在しない日付）は、警告を弱めない側へ寄せる：
 //   ・期日が読めない → 「過ぎている」側として扱う（従来の文字列比較と同じ結果になる）
 //   ・dropが読めない → 「まだ生産中」側として扱う（灰色にして警告を弱めない）
+//   ・LOが読めない   → 「もうLOを迎えている」側として扱う（橙にして警告を弱めない）
 // ───────────────────────────────────────────────
 export const ORANGE = "#ff9f43";   // 要対応（赤・黄とは別系統の橙）
 export const GRAY = "#9aabbd";     // drop済み・対象外（暗い背景でも読める灰）
 export const COMPLIANCE_STATES = ["対象外", "drop済み", "法規不適合", "要対応"];
 
-export function complianceStateOf({ dueDate, drop, decisionState, today = TODAY }) {
+export function complianceStateOf({ dueDate, drop, lo, decisionState, today = TODAY }) {
   if (decisionState === "対象外") return { state:"対象外", label:"対象外（判断済み）", color:GRAY };
   const todayDay = dateDayNumber(today);
   const dueDay = dateDayNumber(dueDate);
   const passed = dueDay === null || todayDay === null ? true : dueDay <= todayDay;
   if (!passed) return { state:"要対応", label:`要対応｜${fmt(dueDate)}まで`, color:ORANGE };
   const dropDay = dateDayNumber(drop);
-  const dropped = dropDay !== null && todayDay !== null && dropDay < todayDay;
-  return dropped
-    ? { state:"drop済み", label:"drop済み（対応対象外）", color:GRAY }
-    : { state:"法規不適合", label:"法規不適合", color:RED };
+  if (dropDay !== null && todayDay !== null && dropDay < todayDay) {
+    return { state:"drop済み", label:"drop済み（対応対象外）", color:GRAY };
+  }
+  const loDay = dateDayNumber(lo);
+  if (loDay !== null && todayDay !== null && loDay > todayDay) {
+    return { state:"要対応", label:`要対応｜${fmt(lo)}まで`, color:ORANGE };
+  }
+  return { state:"法規不適合", label:"法規不適合", color:RED };
 }
 
 // 3か所（帳票セル・コンプラ漏れ一覧・同一性の行）で同じ状態名・色を使うための表示部品。
-export function ComplianceStateText({ dueDate, drop, decisionState, fontSize = 9 }) {
-  const s = complianceStateOf({ dueDate, drop, decisionState });
+export function ComplianceStateText({ dueDate, drop, lo, decisionState, fontSize = 9 }) {
+  const s = complianceStateOf({ dueDate, drop, lo, decisionState });
   return (
     <span style={{ fontSize, fontWeight: s.state === "法規不適合" ? 800 : 700, color: s.color }}>{s.label}</span>
   );
@@ -1497,7 +1507,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                         <span style={{ fontFamily:"ui-monospace,monospace", fontSize:9, color:"#bfe9d8" }}>{c.ck}</span></>}
                       {c.status==="leak" && <>
                         <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:800 }}>申請発生</span><Badge kind={c.kind}/></div>
-                        <ComplianceStateText dueDate={c.dueDate} drop={run.drop} decisionState={dec?.state} /></>}
+                        <ComplianceStateText dueDate={c.dueDate} drop={run.drop} lo={run.lo} decisionState={dec?.state} /></>}
                       {showSame && !isEditingSame &&
                         <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c} decisionState={dec?.state}
                           onOpen={base.state==="ok" ? ()=>{ setEditing(null); setEditDraft(null); setEditingSame({ runKey:run.key, rid:r.rid }); setSameDraft(null); } : null} />}
@@ -1530,12 +1540,12 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
         <span style={{ display:"inline-flex", gap:5 }}><Badge kind="新型"/>指定で適合<Badge kind="継続"/>継続対応</span>
       </div>
       <div style={{ marginTop:6, fontSize:10.5, color:MUTE, lineHeight:1.8 }}>
-        申請発生のセルは、期日とドロップ日{judge && "・人の適用判断"}から
-        <b style={{ color:RED }}>法規不適合</b>（期日が来ていて、まだ生産中）／
-        <b style={{ color:ORANGE }}>要対応｜YYYY/MMまで</b>（期日はこれから）／
+        申請発生のセルは、期日・LO・ドロップ日{judge && "・人の適用判断"}から
+        <b style={{ color:RED }}>法規不適合</b>（期日が来ていて、LOも過ぎ、まだ生産中）／
+        <b style={{ color:ORANGE }}>要対応｜YYYY/MMまで</b>（期日がこれから＝期日まで。期日は過ぎたがLOがまだ＝LOまで）／
         <b style={{ color:GRAY }}>drop済み（対応対象外）</b>（期日が来ているが、すでにドロップ済み）
         {judge && <>／<b style={{ color:GRAY }}>対象外（判断済み）</b>（人が対象外と判断したセル）</>}
-        に分けて表示します。ドロップ当日はまだ生産中として扱います。
+        に分けて表示します。ドロップ当日はまだ生産中として扱い、LOがまだのランは法規不適合にしません。
       </div>
       {judge && (
         <div style={{ marginTop:8, fontSize:10.5, color:"#8fa3b8", lineHeight:1.75, background:`${JUDGE}0d`, border:`1px solid ${JUDGE}33`, borderRadius:9, padding:"8px 12px" }}>
@@ -1572,12 +1582,12 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
             summary.leaks.map((l,i)=>{
               // drop済み・対象外の行も一覧から外さず、灰色の行として残す（F-14）。
               const ds = judge ? findDecision(decIndex, l.run.key, l.rid)?.state : undefined;
-              const dim = complianceStateOf({ dueDate:l.dueDate, drop:l.run.drop, decisionState:ds }).color === GRAY;
+              const dim = complianceStateOf({ dueDate:l.dueDate, drop:l.run.drop, lo:l.run.lo, decisionState:ds }).color === GRAY;
               return (
               <div key={i} style={{ fontSize:12, padding:"5px 0", borderBottom:i<summary.leaks.length-1?`1px solid ${LINE}`:"none" }}>
                 <span style={{ fontFamily:"ui-monospace,monospace", color:dim?GRAY:"#eef4fa" }}>{l.run.typeId}</span>
                 <span style={{ color:"#6b7d90", fontSize:11 }}>（{l.run.gen}）</span> × <span style={{ color:dim?GRAY:"#eef4fa" }}>{l.reg}</span>
-                <Badge kind={l.kind}/>{" "}<ComplianceStateText dueDate={l.dueDate} drop={l.run.drop} decisionState={ds} fontSize={11} />
+                <Badge kind={l.kind}/>{" "}<ComplianceStateText dueDate={l.dueDate} drop={l.run.drop} lo={l.run.lo} decisionState={ds} fontSize={11} />
               </div>);})}
         </Card>
         <Card title="実効ドロップ（規制で縛られる期限）" icon={<Activity size={15} color={CYAN}/>}>
@@ -1664,7 +1674,7 @@ function SamenessLine({ rec, run, reg, base, auto, decisionState, onOpen }) {
           : base.state === "none" ? "比較元が未選択のため新継どおり（比較元を選び直して答え直すと要再確認が消えます）"
           : appliedText(auto, eff)}
         {auto.required && auto.applied && auto.dueDate ? ` ${fmt(auto.dueDate)}` : ""}
-        {auto.status === "leak" && <>{" "}<ComplianceStateText dueDate={auto.dueDate} drop={run.drop} decisionState={decisionState} /></>}
+        {auto.status === "leak" && <>{" "}<ComplianceStateText dueDate={auto.dueDate} drop={run.drop} lo={run.lo} decisionState={decisionState} /></>}
         {stale && <span style={{ color:AMBER }}>（前の比較元への回答）</span>}
       </span>
     </div>
