@@ -19,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
   TODAY, parseImportedData, evalCellWith, summarize, approachingNoticeFor,
-  complianceStateOf, condOf, COMPLIANCE_STATES,
+  complianceStateOf, condOf, COMPLIANCE_STATES, samenessAffects,
 } from "../src/IListApp.jsx";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -114,15 +114,18 @@ const JUDGE_DUMMY = {
 };
 
 // 同一性（F-04）の行用。「同一でない」＝新型車日で判定させる。
-//   DEMO-V（LO=遠い将来）… 比較元。LOがまだ来ていない対照（期日は過去でも法規不適合にしない）
-//   DEMO-W（LO=当日・drop=将来）… 新型車日が前日＝法規不適合、翌日＝要対応
-//   DEMO-X（drop=前日）… 新型車日が前日＝drop済み
+// 同一性の行は「新型車日 ≤ LO」のセルにしか出ない（答えても結論が変わらないセルには出さない）。
+//   PJ-S：DEMO-W（LO=当日）… REG-S-PAST で法規不適合／REG-S-FUTURE は新型車日がLOより後＝行を出さない
+//   PJ-T：DEMO-X（drop=前日）… REG-S-PAST で過去に法規不適合
+//   PJ-U：DEMO-ZZ（LO=60日先）… LO未到来。REG-S-PAST は要対応｜LOまで、REG-S-FUTURE は要対応｜期日まで
 const SAME_DUMMY = {
   runs: [
-    { key: "r411", typeId: "DEMO-V", gen: "PJ-S", sk: "新", lo: FAR, drop: FAR },
-    { key: "r412", typeId: "DEMO-W", gen: "PJ-S", sk: "新", lo: TODAY_D, drop: FAR },
-    { key: "r413", typeId: "DEMO-X", gen: "PJ-T", sk: "新", lo: YESTERDAY, drop: YESTERDAY },
-    { key: "r414", typeId: "DEMO-Y", gen: "PJ-T", sk: "新", lo: YESTERDAY, drop: YESTERDAY },
+    { key: "r411", typeId: "DEMO-V",  gen: "PJ-S", sk: "新", lo: TODAY_D,   drop: FAR },
+    { key: "r412", typeId: "DEMO-W",  gen: "PJ-S", sk: "新", lo: TODAY_D,   drop: FAR },
+    { key: "r413", typeId: "DEMO-X",  gen: "PJ-T", sk: "新", lo: YESTERDAY, drop: YESTERDAY },
+    { key: "r414", typeId: "DEMO-Y",  gen: "PJ-T", sk: "新", lo: YESTERDAY, drop: YESTERDAY },
+    { key: "r415", typeId: "DEMO-Z",  gen: "PJ-U", sk: "新", lo: LO_SOON,   drop: FAR },
+    { key: "r416", typeId: "DEMO-ZZ", gen: "PJ-U", sk: "新", lo: LO_SOON,   drop: FAR },
   ],
   regs: [
     { rid: "g411", id: "REG-S-PAST",   label: "ダミー法規（新型車日は前日）", shin: YESTERDAY, kei: FAR,      parent: "" },
@@ -132,14 +135,16 @@ const SAME_DUMMY = {
   bases: [
     { runKey: "r412", baseRunKey: "r411", decidedAt: STAMP },
     { runKey: "r413", baseRunKey: "r414", decidedAt: STAMP },
+    { runKey: "r416", baseRunKey: "r415", decidedAt: STAMP },
   ],
   sameness: [
     { runKey: "r412", rid: "g411", value: "同一でない", reason: "ダミー：装置を変更", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r411" },
-    { runKey: "r412", rid: "g412", value: "同一でない", reason: "ダミー：装置を変更", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r411" },
+    { runKey: "r412", rid: "g412", value: "同一でない", reason: "ダミー：答えても結論が変わらないセル", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r411" },
     { runKey: "r413", rid: "g411", value: "同一でない", reason: "ダミー：装置を変更", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r414" },
+    { runKey: "r416", rid: "g411", value: "同一でない", reason: "ダミー：装置を変更", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r415" },
   ],
 };
-const SCOL = { r411: 0, r412: 1, r413: 2, r414: 3 };
+const SCOL = { r411: 0, r412: 1, r413: 2, r414: 3, r415: 4, r416: 5 };
 const SROW = { g411: 0, g412: 1 };
 
 // ドロップ済みの2種類を分けるためのダミー（2026-09-20 祥の判断）。
@@ -370,11 +375,12 @@ const SCENARIOS = [
       asserts.checkTrue("コンプラ漏れにも出る", t.includes(`DEMO-E（PJ-E） × REG-PAST継続 ${L_UPCOMING(LO_SOON)}`));
       asserts.check("橙で出す（灰にはしない）", rowStateColor(leakRow(c, "DEMO-E", L_UPCOMING(LO_SOON))), "rgb(255, 159, 67)");
       asserts.check("型式名は灰色にしない", rowTypeColor(leakRow(c, "DEMO-E", L_UPCOMING(LO_SOON))), "rgb(238, 244, 250)");
-      // 同一性の行でも同じ（DEMO-V は LO=遠い将来、新型車日は前日）
+      // 同一性の行でも同じ（DEMO-ZZ は LO=60日先、新型車日は前日）
       const cs = await mountWith(mount, SAME_DUMMY);
-      asserts.check("同一性の行がある列でも法規不適合にしない",
+      asserts.check("同一性の行がある列でもLO未到来なら法規不適合にしない",
+        statesIn(cellText(cs, SROW.g411, SCOL.r416)), [L_UPCOMING(LO_SOON), L_UPCOMING(LO_SOON)]);
+      asserts.check("LOが過ぎている列は法規不適合（対照）",
         statesIn(cellText(cs, SROW.g411, SCOL.r412)), [L_VIOLATION, L_VIOLATION]);
-      asserts.check("比較元（LO未到来）の帳票セル", statesIn(cellText(cs, SROW.g411, SCOL.r411)), [L_UPCOMING(FAR)]);
     },
   },
   {
@@ -452,15 +458,44 @@ const SCENARIOS = [
       const cell = (k, g) => cellText(c, SROW[g], SCOL[k]);
       // 同一性の行があるセルは、帳票セルと同一性の行で同じ状態名が2回出る
       asserts.check("DEMO-W×前日", statesIn(cell("r412", "g411")), [L_VIOLATION, L_VIOLATION]);
-      asserts.check("DEMO-W×翌日", statesIn(cell("r412", "g412")), [L_UPCOMING(TOMORROW), L_UPCOMING(TOMORROW)]);
+      asserts.check("DEMO-ZZ×翌日（期日がこれから）", statesIn(cell("r416", "g412")), [L_UPCOMING(TOMORROW), L_UPCOMING(TOMORROW)]);
       asserts.check("DEMO-X×前日（drop前日・期日＝前日）", statesIn(cell("r413", "g411")), [L_PAST, L_PAST]);
-      asserts.check("DEMO-V（LO未到来）×前日は法規不適合にしない", statesIn(cell("r411", "g411")), [L_UPCOMING(FAR)]);
-      asserts.check("同一性の行が出ていること", ["r412", "r413"].map((k) => cell(k, "g411").includes("同一性：同一でない")), [true, true]);
+      asserts.check("DEMO-ZZ（LO未到来）×前日は法規不適合にしない", statesIn(cell("r416", "g411")), [L_UPCOMING(LO_SOON), L_UPCOMING(LO_SOON)]);
+      asserts.check("同一性の行が出ていること", ["r412", "r413", "r416"].map((k) => cell(k, "g411").includes("同一性：同一でない")), [true, true, true]);
       asserts.check("「期限超過」はどこにも出さない",
-        [["r411", "g411"], ["r412", "g411"], ["r412", "g412"], ["r413", "g411"], ["r414", "g411"]]
-          .map(([k, g]) => cell(k, g).includes("期限超過")), [false, false, false, false, false]);
+        [["r411", "g411"], ["r412", "g411"], ["r412", "g412"], ["r413", "g411"], ["r414", "g411"], ["r416", "g411"]]
+          .map(([k, g]) => cell(k, g).includes("期限超過")), [false, false, false, false, false, false]);
       asserts.checkTrue("画面全体にも「期限超過」は無い", !c.textContent.includes("期限超過"));
       asserts.check("比較元の無い列は帳票セルだけ（状態は1回）", statesIn(cell("r414", "g411")), [L_PAST]);
+      asserts.check("比較元（LO未到来）の帳票セルも1回", statesIn(cell("r415", "g411")), [L_UPCOMING(LO_SOON)]);
+    },
+  },
+  {
+    id: "SAMENESS-hidden-when-no-effect",
+    name: "同一性の答えで判定が何も変わらないセルには、同一性の行を出さない",
+    expect: "新型車日がLOより後のセル（DEMO-W×REG-S-FUTURE）は、保存済みの「同一でない」があっても同一性の行と編集ボタンを出さない。帳票セルの状態と保存値は変わらない",
+    async run({ mount, asserts }) {
+      // 2026-09-20 祥の判断：答えても結論が変わらないセルでは同一性を選ばせない（行ごと出さない）。
+      const c = await mountWith(mount, SAME_DUMMY);
+      const hidden = cellText(c, SROW.g412, SCOL.r412);
+      asserts.checkTrue("同一性の行を出さない", !hidden.includes("同一性"));
+      asserts.check("編集ボタンも出さない",
+        cellAt(c, SROW.g412, SCOL.r412).querySelectorAll('button[title="同一性を編集"]').length, 0);
+      asserts.check("帳票セルの状態は従来どおり出る", statesIn(hidden), [L_UPCOMING(TOMORROW)]);
+      asserts.checkTrue("答えが効くセルには出る（対照）", cellText(c, SROW.g411, SCOL.r412).includes("同一性：同一でない"));
+      asserts.check("対照セルには編集ボタンがある",
+        cellAt(c, SROW.g411, SCOL.r412).querySelectorAll('button[title="同一性を編集"]').length, 1);
+      // 純関数：新型車日 ≤ LO のときだけ答えが効く
+      asserts.check("新型車日がLOより後なら効かない／LO以前なら効く",
+        [samenessAffects(SAME_DUMMY.runs[1], SAME_DUMMY.regs[1]), samenessAffects(SAME_DUMMY.runs[1], SAME_DUMMY.regs[0])], [false, true]);
+      asserts.check("LOが未入力なら選ばせる側", samenessAffects({ lo: "" }, SAME_DUMMY.regs[1]), true);
+      asserts.check("LOが不正な日付でも選ばせる側", samenessAffects({ lo: "2026-02-30" }, SAME_DUMMY.regs[1]), true);
+      asserts.check("新型車日が空なら効かない", samenessAffects({ lo: TODAY_D }, { shin: "", kei: FAR }), false);
+      // LO ≥ 継続車日 のセルは要否こそ変わらないが期日が変わるので、今までどおり選ばせる
+      asserts.check("LO ≥ 継続車日でも選ばせる", samenessAffects({ lo: TODAY_D }, { shin: LONG_AGO, kei: LONG_AGO }), true);
+      // 保存値は消さない（記録としては残る）
+      const snap = await snapshotAll(c);
+      asserts.check("保存済みの回答は残っている", snap.sameness, SAME_DUMMY.sameness);
     },
   },
   {

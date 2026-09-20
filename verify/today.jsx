@@ -53,15 +53,16 @@ const shift = (days, from = LOCAL_TODAY) => {
   return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())}`;
 };
 const YESTERDAY = shift(-1), TOMORROW = shift(1), NEXT_YEAR = shift(365), LONG_AGO = shift(-3650);
+const LO_LATER = shift(60);              // LOがまだ来ていないラン用（翌日と必ず別の年月になる）
 const FAR = shift(3650);                 // 判定を確実に成立／不成立にさせるための遠い日
 const TODAY_D = shift(0);                // 当日（検証側が独立に求めた端末ローカル日付）
 const STAMP = `${TODAY_D} 10:00`;        // 確定日時も実行時の今日から作る
 
 // ── ダミーデータ（架空。実車・実法規・実認可番号とは無関係） ──
 // 継続ランだけを使い、継続車日（kei）＝期日が 前日／当日／翌日／来年 になる4行を作る。
-//   A2：前日 → 期日到来（F-14の状態表示では「法規不適合」。ドロップ日は将来＝生産中のため）
+//   A2：前日 → 期日到来（F-14の状態表示では「法規不適合」。ドロップ日は将来・LOは過去のため）
 //   A4：当日 → 前日と同じ扱い
-//   A3：翌日・来年 → 将来日（F-14の状態表示では「要対応｜YYYY/MMまで」）
+//   A3：翌日・来年 → 将来日（F-14の状態表示では「要対応｜期日の年月まで」）
 // ※ 表示の文言は F-14（期日超過の4状態）で置き換わった。ここで確かめるのは
 //   「今日」の決め方と境界（前日・当日・翌日）であり、F-13のA1〜A8の意味は変えていない。
 const KEI_DUMMY = {
@@ -92,18 +93,19 @@ const EFF_DUMMY = {
 };
 
 // 同一性（F-04）の行用。「同一でない」＝新型車日で判定させ、新型車日を 前日／当日／翌日 にする。
-// LOは当日にする：新型車日 ≤ LO を満たす前日・当日は kind「新型」で期日＝shin、
-// 翌日の行は継続車日（翌日）で要になる。どちらも期日は前日／当日／翌日のまま。
-// （F-14で、LOがまだ来ていないランは法規不適合にしない扱いになったため、LOを将来日にしない。）
+// LOを60日先にして 新型車日 ≤ LO を3行とも満たす＝ kind は常に「新型」、期日＝shin。
+// （F-14で、新型車日がLOより後のセルは同一性の行を出さなくなったため、LOは全行の新型車日より後にする。）
+// LOがまだ来ていないので、期日が到来している行の期限表示はLOの年月、期日がこれからの行は期日の年月になる。
+// ここで確かめるのは「期日 ≤ 今日」の境界（前日・当日 と 翌日 で表示が分かれること）である。
 const SAME_DUMMY = {
   runs: [
-    { key: "r321", typeId: "DEMO-V", gen: "PJ-9", sk: "新", lo: TODAY_D, drop: FAR },
-    { key: "r322", typeId: "DEMO-W", gen: "PJ-9", sk: "新", lo: TODAY_D, drop: FAR },
+    { key: "r321", typeId: "DEMO-V", gen: "PJ-9", sk: "新", lo: LO_LATER, drop: FAR },
+    { key: "r322", typeId: "DEMO-W", gen: "PJ-9", sk: "新", lo: LO_LATER, drop: FAR },
   ],
   regs: [
-    { rid: "g321", id: "REG-S-PAST",     label: "ダミー法規（新型車日は前日）", shin: YESTERDAY, kei: FAR,      parent: "" },
-    { rid: "g322", id: "REG-S-TODAY",    label: "ダミー法規（新型車日は当日）", shin: TODAY_D,   kei: FAR,      parent: "" },
-    { rid: "g323", id: "REG-S-TOMORROW", label: "ダミー法規（期日は翌日）",     shin: TOMORROW,  kei: TOMORROW, parent: "" },
+    { rid: "g321", id: "REG-S-PAST",     label: "ダミー法規（新型車日は前日）", shin: YESTERDAY, kei: FAR, parent: "" },
+    { rid: "g322", id: "REG-S-TODAY",    label: "ダミー法規（新型車日は当日）", shin: TODAY_D,   kei: FAR, parent: "" },
+    { rid: "g323", id: "REG-S-TOMORROW", label: "ダミー法規（新型車日は翌日）", shin: TOMORROW,  kei: FAR, parent: "" },
   ],
   cert: {},
   bases: [{ runKey: "r322", baseRunKey: "r321", decidedAt: STAMP }],
@@ -256,15 +258,15 @@ const SCENARIOS = [
   },
   {
     id: "A2A3A4-sameness-overdue",
-    name: "同一性の行：同一でないで新型車日が前日・当日なら法規不適合、翌日は要対応（F-14で「期限超過」は廃止）",
-    expect: "DEMO-W の3セルで、前日・当日が法規不適合、翌日が要対応。どのセルにも「期限超過」は出ない",
+    name: "同一性の行：同一でないで新型車日が前日・当日なら期日到来側、翌日は期日がこれから側（F-14で「期限超過」は廃止）",
+    expect: "DEMO-W の3セルで、前日・当日はLOの年月を期限に出し、翌日は期日（翌日）の年月を期限に出す。どのセルにも「期限超過」は出ない",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, SAME_DUMMY);
       const col = 1;   // DEMO-W（比較元を選んだ側）
-      asserts.checkTrue("前日は法規不適合", cellText(c, 0, col).includes("法規不適合"));
-      asserts.checkTrue("当日も法規不適合（A4）", cellText(c, 1, col).includes("法規不適合"));
-      asserts.checkTrue("翌日は法規不適合にしない", !cellText(c, 2, col).includes("法規不適合"));
-      asserts.checkTrue("翌日は要対応", cellText(c, 2, col).includes(`要対応｜${fmt(TOMORROW)}まで`));
+      asserts.check("前日・当日は期日到来側（LOの年月）",
+        [0, 1].map((r) => cellText(c, r, col).includes(`要対応｜${fmt(LO_LATER)}まで`)), [true, true]);
+      asserts.checkTrue("翌日は期日がこれから側（期日の年月）", cellText(c, 2, col).includes(`要対応｜${fmt(TOMORROW)}まで`));
+      asserts.checkTrue("翌日にLOの年月は出さない（A3）", !cellText(c, 2, col).includes(`要対応｜${fmt(LO_LATER)}まで`));
       asserts.check("3セルとも「期限超過」を使わない",
         [0, 1, 2].map((r) => cellText(c, r, col).includes("期限超過")), [false, false, false]);
       asserts.check("3セルとも同一性：同一でない のまま",
