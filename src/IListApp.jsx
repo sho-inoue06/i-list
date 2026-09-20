@@ -12,7 +12,17 @@ import { AlertTriangle, ShieldCheck, Minus, Activity, Pencil, Cpu, Plus, Trash2,
 export const INK="#0c1623", PANEL="#13202f", LINE="#22303f", CYAN="#4dd6e0", GREEN="#3fbf8f",
       RED="#ff6b57", MUTE="#5a6b7d", AMBER="#e0b24d";
 export const PALETTE=[CYAN,"#9d8cff",AMBER,GREEN,"#ff9e7d","#6db5ff","#d98cff"];
-export const TODAY="2026-06-28";
+// 「今日」（F-13）。画面を開いた／再読み込みした時点の端末ローカル日付を使う。
+// ・モジュール評価はページの読み込みごとに1回なので、TODAY＝そのページを開いた日になる。
+// ・日をまたいで開きっぱなしの場合は自動更新しない（再読み込みで更新する）。
+// ・基準日を選ぶ・保存する・固定する手段は、製品UI・保存データ・検証用設定のいずれにも持たない。
+// ・期日との比較は「期日 ≤ 今日」で既発効／即対応／期限超過として扱う（当日から）。
+// UTCではなく端末ローカルの暦日を使う（端末の時計に依存する。監査証跡としては保証しない）。
+export function todayStr(d = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+export const TODAY = todayStr();
 
 // ダミーデータ（架空の型式・法規・認可書番号。実車・実データとは無関係）
 export const SEED = {
@@ -1442,7 +1452,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                         <span style={{ fontFamily:"ui-monospace,monospace", fontSize:9, color:"#bfe9d8" }}>{c.ck}</span></>}
                       {c.status==="leak" && <>
                         <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:800 }}>申請発生</span><Badge kind={c.kind}/></div>
-                        <span style={{ fontSize:9, color:"#ffb3a8" }}>{c.dueDate<TODAY?"既発効・即対応":`${fmt(c.dueDate)}までに`}</span></>}
+                        <span style={{ fontSize:9, color:"#ffb3a8" }}>{c.dueDate<=TODAY?"既発効・即対応":`${fmt(c.dueDate)}までに`}</span></>}
                       {showSame && !isEditingSame &&
                         <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c}
                           onOpen={base.state==="ok" ? ()=>{ setEditing(null); setEditDraft(null); setEditingSame({ runKey:run.key, rid:r.rid }); setSameDraft(null); } : null} />}
@@ -1510,7 +1520,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
               <div key={i} style={{ fontSize:12, padding:"5px 0", borderBottom:i<summary.leaks.length-1?`1px solid ${LINE}`:"none" }}>
                 <span style={{ fontFamily:"ui-monospace,monospace", color:"#eef4fa" }}>{l.run.typeId}</span>
                 <span style={{ color:"#6b7d90", fontSize:11 }}>（{l.run.gen}）</span> × <span style={{ color:"#eef4fa" }}>{l.reg}</span>
-                <Badge kind={l.kind}/><span style={{ color:"#ffb3a8", fontSize:11 }}> {l.dueDate<TODAY?"既発効・即対応":fmt(l.dueDate)+"までに"}</span>
+                <Badge kind={l.kind}/><span style={{ color:"#ffb3a8", fontSize:11 }}> {l.dueDate<=TODAY?"既発効・即対応":fmt(l.dueDate)+"までに"}</span>
               </div>))}
         </Card>
         <Card title="実効ドロップ（規制で縛られる期限）" icon={<Activity size={15} color={CYAN}/>}>
@@ -1519,7 +1529,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
               <div key={k} style={{ fontSize:12, padding:"5px 0", borderBottom:i<arr.length-1?`1px solid ${LINE}`:"none" }}>
                 <span style={{ fontFamily:"ui-monospace,monospace", color:"#eef4fa" }}>{run.typeId}</span>
                 <span style={{ color:"#6b7d90", fontSize:11 }}>（{run.gen}）</span>
-                <span style={{ color:risk?RED:MUTE }}> 実効 {d<TODAY?"既発効":fmt(d)}</span>
+                <span style={{ color:risk?RED:MUTE }}> 実効 {d<=TODAY?"既発効":fmt(d)}</span>
                 <span style={{ color:MUTE, fontSize:11 }}>（計画 {fmt(run.drop)}）</span>
                 {risk && <span style={{ color:RED, fontSize:10 }}> ← 早まる</span>}
               </div>);})}
@@ -1576,8 +1586,8 @@ function SamenessLine({ rec, run, reg, base, auto, onOpen }) {
   const live = samenessRecheckReasons(rec, run, reg, base);
   // 認可書の実績があるセルでは要再確認を出さない（記録上のフラグは残す。実績を消すとまた出る）
   const recheck = !auto.ck && (!!rec?.needsRecheck || live.length > 0);
-  // 同一でない→新型車日で、適用日が過去なのに実績がない＝期限超過（要再確認の有無と関係なく出す）
-  const overdue = auto.applied === "新型車日" && auto.status === "leak" && auto.dueDate && auto.dueDate < TODAY;
+  // 同一でない→新型車日で、適用日が今日以前なのに実績がない＝期限超過（要再確認の有無と関係なく出す）
+  const overdue = auto.applied === "新型車日" && auto.status === "leak" && auto.dueDate && auto.dueDate <= TODAY;
   return (
     <div style={{ borderTop:`1px dashed ${LINE}`, marginTop:5, paddingTop:4, display:"flex", flexDirection:"column", gap:3 }}>
       <div style={{ display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" }}>
