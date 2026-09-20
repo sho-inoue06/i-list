@@ -59,8 +59,10 @@ export const SEED = {
   //   r3×B 同一       … 継続車日を借りて「否」（新継どおりなら新型車日で期日到来）
   //   r5×B 同一でない … 000Cで装置変更。新型車日（過去）で申請発生（dropも過去なので drop済み 表示）
   //   r5×D 同一でない … LO≥継続車日なので結論は変わらず、要再確認も立たない（実績ありで緑。実績ありのセルは要再確認を出さない）
-  //   r3×C 未確認     … 同一から未確認へ戻した例。実績が無いので要再確認が残っている
-  //   r7×E 同一でない … 初回回答で要再確認が立った例。新型車の式だが継続車日で要になる
+  //   r3×C 未確認     … 同一から未確認へ戻した例。※新型車日(2025/01)がLO(2021/04)より後のため、
+  //                      いまは同一性の行を出さない（答えても結論が変わらないセル）。記録としては残っている
+  //   r7×E 同一でない … 初回回答で要再確認が立った例。※新型車日(2028/01)がLO(2027/01)より後のため、
+  //                      いまは同一性の行を出さない（答えても継続車日で要になるだけのセル）。記録としては残っている
   //   r7×C 未確認     … 手を付けていない例（同一と答えると期日が変わる）
   bases:[
     {runKey:"r3",baseRunKey:"r2",decidedAt:"2026-09-19 10:00"},
@@ -489,6 +491,24 @@ export function setBase(bases, runKey, baseRunKey, decidedAt = nowStamp()) {
 export function samenessMatters(run, reg) {
   const lo = dateDayNumber(run?.lo), kei = dateDayNumber(reg?.kei);
   return !(lo !== null && kei !== null && lo >= kei);
+}
+
+// 同一性の答え（同一／同一でない）で、判定が何か変わるセルか（2026-09-20 祥の判断）。
+//
+// evalCellWith を見ると、両者の違いは「新型車日 ≤ LO」が成り立つときだけ生まれる。
+//   成り立つ   … 同一でない→要（種別「新型」・期日＝新型車日）／同一→継続車日で判定。種別も期日も変わる
+//   成り立たない … 同一でない も継続車日へ落ちるので、同一とまったく同じ結論になる
+// 後者は「そもそも新型車規制が適用されないラン」＝同一かどうかを聞く意味がないセルなので、
+// 呼び出し側は同一性の行そのものを出さない（選ばせない）。
+//
+// これは samenessMatters（要再確認を立てるか＝要否が変わるか）とは別の判定である。
+// LO ≥ 継続車日 のセルは要否こそ変わらないが期日は変わるため、ここでは true（選ばせる）になる。
+//
+// LOが未入力・不正な日付のときは「変わりうる」側（選ばせる側）に倒す。
+// 比較は evalCellWith と同じ文字列比較にそろえる（判定と食い違わせないため）。
+export function samenessAffects(run, reg) {
+  if (dateDayNumber(run?.lo) === null) return true;
+  return !!(reg?.shin && reg.shin <= run.lo);
 }
 
 export function samenessIndex(sameness) {
@@ -1505,7 +1525,9 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                   const base = sameCtx ? sameCtx.base(run) : null;
                   // 比較元が未選択でも、回答や要再確認が残っているセルには出す（警告を隠さない）
                   const sameRec = sameCtx ? sameCtx.rec(run, r) : null;
-                  const showSame = !!base && (base.state!=="none" ||
+                  // 同一性の答えで判定が何も変わらないセルには、行そのものを出さない（選ばせない）。
+                  // 保存済みの回答・要再確認は記録としては残るが、画面には出さない（2026-09-20 祥の判断）。
+                  const showSame = !!base && samenessAffects(run, r) && (base.state!=="none" ||
                     (!!sameRec && (sameRec.needsRecheck || sameRec.value!=="未確認")));
                   const isEditingSame = showSame && editingSame && editingSame.runKey===run.key && editingSame.rid===r.rid;
                   return (
@@ -1579,6 +1601,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
           <b style={{color:SAME}}>「同一性：」</b>は比較元（型式ランタブで選ぶ・同じプロジェクト内の別型式）と当該装置の性能が同一かの回答です。比較元を選んだランの列にだけ出ます。
           <b style={{color:"#eef4fa"}}>同一</b>＝継続車側の規制日を適用、<b style={{color:"#eef4fa"}}>同一でない</b>＝新型車側の規制日を適用、未確認＝従来どおり新継で判定します。
           同一でない・未確認に変わると<b>要再確認</b>になり、メモの保存では消えず、同一性を答え直して確定したときだけ消えます。認可書の実績があるセルには要再確認を出しません。
+          <b>新型車日がLOより後の法規</b>は、同一でも同一でなくても継続車日で判定が決まるため、同一性の行を出しません（答えても結果が変わらないため）。
           <span style={{ display:"inline-flex", alignItems:"center", gap:8, flexWrap:"wrap", marginTop:6 }}>
             <span style={{ color:MUTE }}>見分け：</span>
             <SamenessTag value="同一" /><SamenessTag value="同一でない" /><SamenessTag value="未確認" />
