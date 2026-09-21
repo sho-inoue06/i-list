@@ -252,7 +252,9 @@ const SCENARIOS = [
       asserts.checkTrue("比較元未選択なら同一性は出ない", !c.querySelector("table tbody").textContent.includes("同一性："));
       await chooseBase(c, "r202", "r201");
       asserts.checkTrue("比較元を選んだ列に未確認", cellText(c, "r202", "g201").includes("同一性：未確認") && cellText(c, "r202", "g202").includes("同一性：未確認"));
-      asserts.checkTrue("他の列には出ない", !cellText(c, "r201", "g201").includes("同一性") && !cellText(c, "r203", "g201").includes("同一性"));
+      // 見るのは同一性の行ラベル「同一性：」。F-12の根拠の理由文にも「同一性」の語が出るため、
+      // 語だけで見ると行が出ていなくても一致してしまう（252行目と同じ見方にそろえる）。
+      asserts.checkTrue("他の列には出ない", !cellText(c, "r201", "g201").includes("同一性：") && !cellText(c, "r203", "g201").includes("同一性："));
       await editSame(c, "r202", "g201", { value: "同一", reason: REASON_TRICKY });
       await editSame(c, "r202", "g202", { value: "同一でない" });
       asserts.checkTrue("g201は同一", cellText(c, "r202", "g201").includes("同一性：同一"));
