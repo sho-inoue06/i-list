@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>比較元を官報準拠にする（F-12） 検証ハーネス（ダミー専用）</title>
+    <style>html, body { margin: 0; min-height: 100%; } body { background: #0c1623; }</style>
+  </head>
+  <body>
+    <!--
+      F-12（比較元の連鎖をたどって根拠を示す／根拠未確認を出す）の検証ページ。ダミーデータのみ。
+      実APIサーバ・実DB（data/ilist.db）には接続しない。
+
+      このハーネスは固定日付を使う。根の判定は「LO ≤ その法規の新型車適用日」という
+      日付どうしの前後関係だけで決まり、「今日」に依存しないため（F-13〜F-15とはここが違う）。
+      今日に依存する表示（F-14の状態名・F-15の黄色）はこのページでは判定対象にしない。
+
+      実行方法（npm run dev は使わない：APIサーバと既存DBを開いてしまうため）：
+        node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
+        → http://127.0.0.1:5173/verify/basis.html
+    -->
+    <div id="runner"></div>
+    <script type="module" src="/verify/basis.jsx"></script>
+  </body>
+</html>
