@@ -17,7 +17,7 @@ import {
   MatrixView, RunsEditor, RegsEditor, CertEditor,
   sweepRecheck, upsertDecision, normalizeDecisions, markRunNeedsRecheck,
   pruneDecisionsByRun, pruneDecisionsByReg,
-  setBase, sweepSameness, upsertSameness, normalizeSameness, makeSamenessContext,
+  setBase, sweepSameness, upsertSameness, normalizeSameness, makeSamenessContext, makeBasisContext,
   pruneBasesByRun, pruneSamenessByRun, pruneSamenessByReg,
   INK, PALETTE, btn,
 } from "../src/IListApp.jsx";
@@ -180,6 +180,9 @@ export default function StandaloneApp({ bootData } = {}) {
   // 同一性（F-04）で継続車日／新型車日を切り替える。比較元が未選択・無効のランは従来どおり。
   const sameCtx = useMemo(() => makeSamenessContext(runs, bases, sameness), [runs, bases, sameness]);
   const evalCell = (run, r) => evalCellWith(cert, run, r, sameCtx.effective(run, r));
+  // 比較元の連鎖と根拠（F-12）。判定には使わず、セルの根拠文・根拠未確認の印だけに使う。
+  // regs も依存に入れる：法規の日付が変わると対象判定（継続車扱いで要否が変わるか）も根も変わるため。
+  const basisCtx = useMemo(() => makeBasisContext(runs, sameCtx), [runs, regs, sameCtx]);
   const summary = useMemo(() => summarize(runs, regs, cert, sameCtx.effective), [runs, regs, cert, sameCtx]);
 
   const exportJSON = () => {
@@ -348,7 +351,7 @@ export default function StandaloneApp({ bootData } = {}) {
         {tab==="帳票" && <MatrixView {...{runs,regs,evalCell,summary,colorOf,decisions,dataGen}}
           columnFilter={{ selProjects, setSelProjects, selTypes, setSelTypes, clear: clearColumnFilter }}
           onSaveDecision={handleSaveDecision} onRecheckRun={handleRecheckRun}
-          sameCtx={sameCtx} onSaveSameness={handleSaveSameness} />}
+          sameCtx={sameCtx} onSaveSameness={handleSaveSameness} basisCtx={basisCtx} />}
         {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey,bases}} onDeleteRun={handleDeleteRun} onSetBase={handleSetBase} />}
         {tab==="法規DB" && <RegsEditor {...{regs,setRegs}} onDeleteReg={handleDeleteReg} />}
         {tab==="認可書実績" && <CertEditor {...{typeIds,regs,cert,setCert,colorOf,evalCell,runs}} />}

@@ -624,6 +624,175 @@ export function makeSamenessContext(runs, bases, sameness) {
   return { base, rec, effective };
 }
 
+// ───────────────────────────────────────────────
+// 比較元の連鎖と根拠（F-12）
+//
+// 官報の言い方（「○年○月○日以前に指定を受けた自動車と、当該装置に変更がないもの」）に合わせると、
+// 継続車適用日の猶予を使ってよい根拠は「その法規の新型車適用日以前に指定を受けた指定から、
+// その装置が変更されていないこと」である。1つ前の型式ランは中継点にすぎず、根ではない。
+//
+// ここで足すのは判定ではなく **根拠をたどれること** だけ。
+// 要否・期日・色・要再確認（F-04のA5）・黄色の予告（F-15）・人の判断・保存データ形式は一切変えない。
+//
+// ■ どのセルを対象にするか（B2・B5・B9）
+// **「継続」表示＝猶予を借りている、ではない。** 新型車扱いでも継続車扱いでも要否が同じセルでは、
+// 連鎖がつながっていようと切れていようと結論は動かない。そこへ警告を出すと、要否に影響しない
+// 警告で画面が埋まる（停止①の現物確認で、LOが継続車日より後のセルにも根拠未確認が出て分かった）。
+// そこで対象は、**継続車扱いにすることで要否が変わるセルだけ**とする。
+//   ・要否は既存の判定式（evalCellWith）をそのまま2回使って比べる。F-12用の式は作らない。
+//   ・さらに、そのセルが実際に継続車側で判定されていること（＝猶予を使っていること）も要る。
+//     同一性が「同一でない」等で新型車側に決まっているセルは、猶予を使っていないので対象外
+//     （そこが新しい連鎖の始点＝F-04のA4のままで、F-12は何も足さない）。
+//
+// ■ 連鎖の辺は2種類（B3）
+//   (a) 同じ型式記号（typeId）の時間方向 … 型式記号が一致する「LOがより前のラン」へ自動でつなぐ（人の入力は要らない）
+//   (b) 同一プロジェクト内で人が確定した比較元（F-04の bases） … 同一性の回答が「同一」のときだけ辺として使う
+// **(a) があるときは (a) だけを使い、(b) へフォールバックしない**（直前の同一型式を飛ばして
+// 都合のよい横比較へ逃げないための安全側ルール）。(b) は「その型式の最初のラン（前の指定が無い）」の辺になる。
+//
+// ■ 根（B4）：その法規の新型車適用日（shin）以前にLOを持つ型式ラン（LO ≤ shin）。
+//   新型車適用日は法規ごとに違うので、同じ型式ランでも法規ごとに連鎖検証の要否が変わってよい。
+//   F-12のNotionページはこの日付を「基準日 D」と呼ぶが、画面には「新型車適用日」と書く。
+//   F-13で「基準日（＝今日）を選ぶ・固定する手段は持たない」と決めており、画面で語が二重になるため。
+//   境界（LO＝新型車適用日ちょうど）は「以前」に含める＝根として扱う（法令用語の「以前」は当日を含む）。
+//
+// ■ 根拠未確認（B5）：対象セルで、連鎖の途中の同一性が「未確認」／LOが読めない／前段が見つからない／循環（B7）。
+//   F-04のA5「要再確認」とは別の印として出す（混ぜると画面が要再確認だらけになるため）。
+//   対象外のセルには根拠文も根拠未確認も出さない（B5・B8）。
+// ───────────────────────────────────────────────
+export const BASIS_STATES = ["対象外", "自分が根", "根到達", "根拠未確認"];
+
+// (a) の辺：同じ型式記号（typeId）で、LOがより前のラン。
+//   one       … 一意に決まった（自分より前のランのうち、LOが最も後のもの）
+//   none      … 前のランが無い（その型式の最初のラン）
+//   ambiguous … 一意に決められない（同じLOの候補が複数ある／同じ型式にLOが読めないランがある）
+// 一意に決められないときは黙って1つ選ばず、根拠未確認へ倒す（任意の前段を選んで確定扱いにしない）。
+export function chainPrevRun(run, runs) {
+  // 型式記号が空のランは(a)の辺を作らない。空欄どうしを突き合わせても「同じ型式」とは確認できず、
+  // 型式を特定できないデータから「変更なしで継続」と断定してしまう
+  // （比較元の候補がプロジェクトコードの空欄を除くのと同じ扱い）。
+  // 人が確定した比較元（(b)の辺）は、型式記号が空でも人の明示の回答なので従来どおり使える。
+  if (!run?.typeId) return { state: "none", run: null, reason: "" };
+  const self = dateDayNumber(run?.lo);
+  if (self === null) return { state: "ambiguous", run: null, reason: "この型式ランのLOが読めない" };
+  const mates = (runs || []).filter((x) => x && x.key !== run.key && x.typeId === run.typeId);
+  if (mates.some((x) => dateDayNumber(x.lo) === null))
+    return { state: "ambiguous", run: null, reason: "同じ型式にLOが読めないランがあり前段を決められない" };
+  let best = null, bestDay = null, tie = false;
+  for (const x of mates) {
+    const d = dateDayNumber(x.lo);
+    if (d >= self) continue;
+    if (bestDay === null || d > bestDay) { best = x; bestDay = d; tie = false; }
+    else if (d === bestDay) tie = true;
+  }
+  if (best === null) return { state: "none", run: null, reason: "" };
+  if (tie) return { state: "ambiguous", run: null, reason: "同じLOの前のランが複数あり前段を決められない" };
+  return { state: "one", run: best, reason: "" };
+}
+
+// 根（B3）。LO・新型車適用日のどちらかが読めなければ根としない（＝根拠未確認側へ倒す）。
+export function isBasisRoot(run, reg) {
+  const lo = dateDayNumber(run?.lo), shin = dateDayNumber(reg?.shin);
+  if (lo === null || shin === null) return false;
+  return lo <= shin;
+}
+
+// B2：継続車扱いにすることで要否が変わるセルか（反実仮想）。
+// 既存の判定式（evalCellWith）を、同一性を「同一でない」＝新型車側・「同一」＝継続車側に固定して2回呼び、
+// required（要か否か）だけを比べる。F-12のための判定式は作らない（二重管理をしないため）。
+// cert は status／認可書番号にしか効かず required には関与しないので、ここでは空の認可書実績で呼ぶ。
+const NO_CERT = Object.freeze({});
+export function graceChangesNeed(run, reg) {
+  const asShin = evalCellWith(NO_CERT, run, reg, "同一でない");
+  const asKei = evalCellWith(NO_CERT, run, reg, "同一");
+  return asShin.required !== asKei.required;
+}
+
+// そのセルが「継続車適用日の猶予を使っている」か＝F-12の対象セルか（B2）。
+//   1. いま継続車側で判定されている（新型車側に決まっているセルは猶予を使っていない）
+//   2. 継続車扱いにすることで要否が変わる（両方「要」・両方「否」なら連鎖は結論を左右しない）
+// 1の判定は evalCellWith と同じ文字列比較・同じ枝の見方にそろえる（判定と食い違わせないため）。
+export function usesGrace(run, reg, sameness) {
+  const sk = sameness === "同一" ? "継" : sameness === "同一でない" ? "新" : run?.sk;
+  const judgedAsKei = !(sk === "新" && reg?.shin && reg.shin <= run?.lo);
+  return judgedAsKei && graceChangesNeed(run, reg);
+}
+
+// セル（型式ラン × 法規）の根拠。判定には一切影響しない（表示と説明のためだけに使う）。
+//   state … "対象外"（B2の対象でない＝猶予を使っていない／使っても要否が変わらない。何も出さない）
+//           "自分が根"（この型式ラン自身のLOが新型車適用日以前＝自分の指定が根。対象セルでは境界の当日だけ起きる）
+//           "根到達"（連鎖をたどって根に届いた）
+//           "根拠未確認"（届かない／たどれない）
+//   root  … 根の型式ラン（根到達・自分が根のときだけ）
+//   hops  … 中継点の数（根到達のとき。自分と根の間に挟まったランの数）
+//   path  … たどった型式ラン（先頭＝自分。根到達なら末尾＝根）
+//   text  … B6の1行説明
+// sameCtx は省略可（F-04の比較元・同一性を持たない版では (a) の辺だけで連鎖をたどる）。
+export function basisOf(run, reg, runs, sameCtx = null) {
+  const none = (reason) => ({ state: "対象外", reason, root: null, hops: 0, path: [], text: "" });
+  const unknown = (reason, path) => ({
+    state: "根拠未確認", reason, root: null, hops: Math.max(path.length - 1, 0), path,
+    text: `根拠未確認：${reason}`,
+  });
+  const sameness = sameCtx ? sameCtx.effective(run, reg) : null;
+  if (!usesGrace(run, reg, sameness)) {
+    return none(graceChangesNeed(run, reg)
+      ? "新型車日で判定しているため継続車適用日の猶予を使っていない"
+      : "新型車日でも継続車日でも要否が同じため、連鎖は要否を左右しない");
+  }
+  if (dateDayNumber(reg.shin) === null) return unknown("法規の新型車適用日が読めない", [run]);
+
+  const at = (x) => `${x.typeId}（${x.gen}）`;   // 連鎖のどの型式ランで止まったかを理由に入れる
+  const path = [], visited = new Set();
+  let node = run;
+  for (;;) {
+    if (visited.has(node.key)) return unknown(`連鎖が循環している（${at(node)}へ戻る）`, path);
+    visited.add(node.key);
+    path.push(node);
+    if (dateDayNumber(node.lo) === null)
+      return unknown(node.key === run.key ? "この型式ランのLOが読めない"
+        : `連鎖の途中${at(node)}のLOが読めない`, path);
+    if (isBasisRoot(node, reg)) {
+      const hops = Math.max(path.length - 2, 0);
+      return node.key === run.key
+        ? { state: "自分が根", reason: "", root: node, hops: 0, path,
+            text: `根拠：この型式ラン自身の指定（LO ${fmt(node.lo)}）が新型車適用日 ${fmt(reg.shin)} 以前（中継0件）` }
+        : { state: "根到達", reason: "", root: node, hops, path,
+            text: `根拠：${node.typeId}（${node.gen}・LO ${fmt(node.lo)}）の指定から変更なしで継続（中継${hops}件）` };
+    }
+    // 前段へ。(a) 同じ型式の時間方向を先に見る。
+    const prev = chainPrevRun(node, runs);
+    if (prev.state === "ambiguous") return unknown(`${at(node)}：${prev.reason}`, path);
+    if (prev.state === "one") { node = prev.run; continue; }
+    // (b) 同一プロジェクト内で人が確定した比較元。同一性が「同一」のときだけ辺として使う。
+    const base = sameCtx ? sameCtx.base(node) : null;
+    if (!base || base.state === "none") return unknown(`${at(node)}に前段が無い（前のランも比較元も無い）`, path);
+    if (base.state === "invalid") return unknown(`${at(node)}の比較元が無効で前段をたどれない`, path);
+    const v = sameCtx.effective(node, reg);
+    if (v === "同一でない")
+      return unknown(`${at(node)}が比較元と同一でない＝そこが新しい連鎖の始点になり、根まで届かない`, path);
+    if (v !== "同一") return unknown(`${at(node)}の同一性が未確認`, path);
+    node = base.baseRun;
+  }
+}
+
+// 画面・検証から使うための索引。連結キーを作らず入れ子のMapにする（runKeyにどんな文字が入っても衝突しない）。
+//
+// 内側のキーは法規行そのもの（オブジェクト）にする。rid で覚えると、同じ行の日付を編集したときに
+// 古い対象判定・根・説明を返してしまう（法規DBの編集は行オブジェクトを作り直すので、参照で持てば必ず作り直される）。
+// 呼び出し側も runs だけでなく regs が変わったらこの索引を作り直すこと（StandaloneApp の useMemo 参照）。
+export function makeBasisContext(runs, sameCtx = null) {
+  const cache = new Map();
+  return {
+    of(run, reg) {
+      if (!cache.has(run.key)) cache.set(run.key, new Map());
+      const m = cache.get(run.key);
+      if (!m.has(reg)) m.set(reg, basisOf(run, reg, runs, sameCtx));
+      return m.get(reg);
+    },
+  };
+}
+
 // 採番の上限。生成できる範囲と読み込める範囲を同じ値にそろえる。
 // ここがずれると「自分が書き出したJSONを読み戻せない」ことが起きる。
 // 上限そのものは読み込めるが、それを超える追加はできない（＝追加時に上限エラー）。
@@ -1409,7 +1578,7 @@ function ColumnFilterBar({ projectOptions, typeOptions, selProjects, setSelProje
 }
 
 // sameCtx / onSaveSameness は省略可能（F-04・単体版のみ）。省略時は同一性のUIを一切描画しない。
-export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, onSaveDecision, onRecheckRun, dataGen, columnFilter, sameCtx, onSaveSameness }) {
+export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, onSaveDecision, onRecheckRun, dataGen, columnFilter, sameCtx, onSaveSameness, basisCtx }) {
   // 黄色は status="off"（否）の表示だけを差し替える注記であり、要否判定(status)そのものは変えない。
   // ok（緑）・leak（赤）の判定・配色には一切関与しない（既存の赤警告を黄色で弱めないため）。
   // 人の適用判断もセルの色には一切関与しない（対象外を緑にしない・赤を消さない）。
@@ -1542,6 +1711,9 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                   const showSame = !!base && samenessAffects(run, r) && (base.state!=="none" ||
                     (!!sameRec && (sameRec.needsRecheck || sameRec.value!=="未確認")));
                   const isEditingSame = showSame && editingSame && editingSame.runKey===run.key && editingSame.rid===r.rid;
+                  // 根拠（F-12）：継続車日を借りているセルだけ、根拠文か根拠未確認の印を出す。
+                  // 判定・色・期日・要再確認には一切関与しない（表示だけ）。
+                  const basis = basisCtx ? basisCtx.of(run, r) : null;
                   return (
                   <td key={run.key} style={{ padding:0 }}>
                     <div style={{ background:st.bg, border:`1px solid ${st.bd}`, borderRadius:7, padding:"7px 8px", minHeight:48, display:"flex", flexDirection:"column", justifyContent:"center", gap:2 }}>
@@ -1564,6 +1736,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                           onDraftChange={(d)=>setSameDraft({ runKey:run.key, rid:r.rid, ...d })}
                           onCancel={()=>{ setEditingSame(null); setSameDraft(null); }}
                           onSave={(rec)=>{ onSaveSameness(rec); setEditingSame(null); setSameDraft(null); }} />}
+                      <BasisLine basis={basis} />
                       {judge && !isEditing &&
                         <DecisionLine dec={dec} run={run} reg={r} regs={regs}
                           onOpen={()=>{ setEditingSame(null); setSameDraft(null); setEditing({ runKey:run.key, rid:r.rid }); setEditDraft(null); }} />}
@@ -1618,6 +1791,18 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
             <span style={{ color:MUTE }}>見分け：</span>
             <SamenessTag value="同一" /><SamenessTag value="同一でない" /><SamenessTag value="未確認" />
           </span>
+        </div>
+      )}
+      {basisCtx && (
+        <div style={{ marginTop:8, fontSize:10.5, color:"#8fa3b8", lineHeight:1.75, background:`${SAME}0d`, border:`1px dashed ${SAME}55`, borderRadius:9, padding:"8px 12px" }}>
+          <b style={{ color:SAME }}>「根拠：」</b>が出るのは、<b>継続車適用日の猶予を使っているセル</b>だけです
+          （＝新型車日なら「要」・継続車日なら「否」になるセル。「新型車適用日以前に指定を受けた自動車と、当該装置に変更がない」と言って先送りしているセル）。
+          どちらの日で判定しても要否が同じセルには出しません（連鎖の成否が結論を左右しないため）。
+          連鎖は<b>同じ型式記号の前のラン</b>を優先してたどり、それが無いときだけ<b>人が確定した比較元（「同一」と答えたものだけ）</b>をたどります。
+          <b>その法規の新型車適用日以前にLOを持つ型式ラン＝根</b>まで届けば、根と中継点の数を1行で出します。
+          途中の同一性が未確認・LOが読めない・前段が無い・連鎖が循環している場合は
+          <span style={{ display:"inline-flex", verticalAlign:"middle", margin:"0 3px" }}><BasisUnknownBadge /></span>
+          になります。<b>判定・期日・色・要再確認は変わりません</b>（根拠をたどれたかを示すだけの表示です）。同一性の<b>要再確認</b>とは別の印です。
         </div>
       )}
       {filterActive && (
@@ -1726,6 +1911,48 @@ function SamenessLine({ rec, run, reg, base, auto, decisionState, onOpen }) {
         {auto.status === "leak" && <>{" "}<ComplianceStateText dueDate={auto.dueDate} drop={run.drop} lo={run.lo} decisionState={decisionState} /></>}
         {stale && <span style={{ color:AMBER }}>（前の比較元への回答）</span>}
       </span>
+    </div>
+  );
+}
+
+// ===== 根拠（F-12）：セル内の「根拠：」行と「根拠未確認」の印 =====
+// 表示だけの行。要否・色・期日・要再確認（F-04のA5）・人の判断には一切関与しない。
+
+// 「根拠未確認」の印。F-04の「要再確認」（黄色・実線の角箱・三角アイコン）とは
+// 文言・色・形のすべてを変える（青系・破線のピル・アイコンなし）＝完成条件B4の「別の表示」。
+export function BasisUnknownBadge() {
+  return (
+    <span style={{
+      display:"inline-flex", alignItems:"center", whiteSpace:"nowrap",
+      fontSize:9, fontWeight:700, color:SAME, background:"rgba(12,20,32,0.55)",
+      border:`1px dashed ${SAME}`, borderRadius:999, padding:"0 4px",
+    }}>根拠未確認</span>
+  );
+}
+
+// セル内の「根拠：」行。
+//   対象外   … B2の対象外（猶予を使っていない／使っても要否が変わらない）＝何も出さない（B5・B8）
+//   自分が根 … 自分の指定が根。対象セルなので1行出す
+//   根到達   … どの型式ランのどの指定から変更なしで継続しているかを1行で出す（B6）
+//   根拠未確認 … 印と理由を出す（B5）。猶予を使っていることも一緒に書く
+function BasisLine({ basis }) {
+  if (!basis || basis.state === "対象外") return null;
+  const unknown = basis.state === "根拠未確認";
+  return (
+    <div style={{ borderTop:`1px dashed ${LINE}`, marginTop:5, paddingTop:4, display:"flex", flexDirection:"column", gap:3 }}>
+      {unknown ? (
+        <>
+          <div style={{ display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" }}>
+            <span style={{ fontSize:9, color:MUTE, flex:"none" }}>根拠：</span>
+            <BasisUnknownBadge />
+          </div>
+          <span style={{ fontSize:9, color:"#8fa3b8", lineHeight:1.5 }}>継続車適用日の猶予を使っているが、{basis.reason}</span>
+        </>
+      ) : (
+        <span style={{ fontSize:9, color:"#8fa3b8", lineHeight:1.5 }}>
+          <span style={{ color:MUTE }}>根拠：</span>{basis.text.replace(/^根拠：/, "")}
+        </span>
+      )}
     </div>
   );
 }
