@@ -19,8 +19,8 @@ import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import {
-  decideCell, effectiveSideOf, certPlanOf, productionPhaseOf, deadlineOf,
-  evalCellWith, complianceStateOf, approachingNoticeFor, parseImportedData,
+  decideCell, effectiveSideOf, certPlanOf, productionPhaseOf, deadlineOf, makeSamenessContext,
+  evalCellWith, complianceStateOf, complianceOfDecision, approachingNoticeFor, parseImportedData,
   MatrixView, summarize, PRODUCTION_PHASES, CELL_DISPLAYS,
 } from "../src/IListApp.jsx";
 import { DECISION_CASES } from "./decision-table-cases.js";
@@ -336,6 +336,67 @@ const SCENARIOS = [
       asserts.check("状態表示もmaxを使う",
         complianceStateOf({ dueDate: "2026-02-01", drop: "2030-01-01", lo: "2026-06-01", today: "2026-01-01" }).label,
         `要対応｜${fmt("2026-06-01")}まで`);
+    },
+  },
+  {
+    id: "C1-review-1-state-from-decision",
+    name: "C1（レビュー指摘1）：申請発生セルの4状態も決定表の出力から作る。表示側で日付から再判定しない",
+    expect: "前提外のデータ（LO > drop）でも、決定表の不適合フラグと画面の状態名が食い違わない",
+    run: async ({ asserts }) => {
+      // 指摘1の再現入力：LO=2027-01-01 / drop=2025-12-31（LOがdropより後）/ 新型車日=2020-01-01 /
+      //                  継続車日=2030-01-01 / 今日=2026-09-22 / 新・実績なし
+      const IN = { lo: "2027-01-01", drop: "2025-12-31", shin: "2020-01-01", kei: "2030-01-01",
+        today: "2026-09-22", side: "新", certPlan: "実績なし+予定なし" };
+      const d = decideCell(IN);
+      asserts.check("決定表の出力", [d.生産フェーズ, d.要否, d.超過, d.現在法規不適合, d.過去に法規不適合, d.法規適合必要],
+        ["開発中", "要", false, false, false, true]);
+      const view = complianceOfDecision(d, { lo: IN.lo, drop: IN.drop, dueDate: d.規制日 });
+      asserts.check("画面の状態名は決定表と同じ側（過去不適合にしない）", view.state, "要対応");
+      asserts.check("期限はLO（max）", view.label, `要対応｜${fmt(IN.lo)}まで`);
+      // 決定表を持たない入口（complianceStateOf）も同じ答えになる
+      asserts.check("complianceStateOf も一致",
+        complianceStateOf({ dueDate: d.規制日, drop: IN.drop, lo: IN.lo, today: IN.today }).label, view.label);
+      // 852ケース全体でも、決定表の3フラグと画面の状態名が1対1で対応する
+      const bad = [];
+      for (const r of DECISION_CASES) {
+        const dd = decideCell({ ...r.in });
+        if (dd.要否 !== "要" || r.in.certPlan === "実績あり") continue;
+        const v = complianceOfDecision(dd, { lo: r.in.lo, drop: r.in.drop, dueDate: dd.規制日 });
+        const 期待 = dd.現在法規不適合 ? "法規不適合" : dd.過去に法規不適合 ? "過去不適合" : "要対応";
+        if (v.state !== 期待) bad.push(`${r.id}: 期待=${期待} 実際=${v.state}`);
+      }
+      asserts.check("852ケースで決定表と状態名が食い違う件数", bad.length, 0);
+      if (bad.length) asserts.failures.push(bad.slice(0, 5).join("\n"));
+    },
+  },
+  {
+    id: "C3-review-23-unconfirmed-text",
+    name: "C3（レビュー指摘2・3）：未確認のセルに「安全側で新型車側にした」ことが出る",
+    expect: "指定区分が継でも「新継どおり」とは書かず、未確認のため新型車側で判定したことが画面に出る",
+    run: async ({ mountNode, asserts }) => {
+      // 指摘2・3の再現入力：指定区分=継、有効な比較元あり、同一性未回答、
+      //   LO=2023-01-01 / drop=2028-01-01 / 新型車日=2020-01-01 / 継続車日=2030-01-01
+      const runs = [
+        { key: "r621", typeId: "DEMO-M1", gen: "PJ-M", sk: "新", lo: "2023-01-01", drop: "2028-01-01" },
+        { key: "r622", typeId: "DEMO-M2", gen: "PJ-M", sk: "継", lo: "2023-01-01", drop: "2028-01-01" },
+      ];
+      const regs = [{ rid: "g621", id: "REG-M", label: "ダミー法規M", shin: "2020-01-01", kei: "2030-01-01", parent: "" }];
+      const bases = [{ runKey: "r622", baseRunKey: "r621", decidedAt: "2026-09-22 10:00" }];
+      const sameCtx = makeSamenessContext(runs, bases, []);   // 同一性は未回答（レコード無し）
+      asserts.check("決定表は根拠未確認＝はい・新型車側",
+        [sameCtx.effective(runs[1], regs[0]), effectiveSideOf(runs[1], sameCtx.effective(runs[1], regs[0]))],
+        ["未確認", { side: "新", 根拠未確認: true }]);
+      const evalCell = (run, r) => evalCellWith({}, run, r, sameCtx.effective(run, r));
+      asserts.check("指定区分は継だが新型で要になる", [evalCell(runs[1], regs[0]).kind, evalCell(runs[1], regs[0]).status],
+        ["新型", "leak"]);
+      const h = mountNode(<MatrixView runs={runs} regs={regs} evalCell={evalCell}
+        summary={summarize(runs, regs, {}, sameCtx.effective)} colorOf={() => "#4dd6e0"}
+        sameCtx={sameCtx} onSaveSameness={() => {}} />);
+      await sleep(60);
+      const t = cellText(h.container, 0, 1);
+      asserts.check("「新継どおり」とは書かない", t.includes("新継どおり"), false);
+      asserts.check("未確認のため安全側であることが出る",
+        [t.includes("未確認のため安全側"), t.includes("新型車日を適用"), t.includes("同一性")], [true, true, true]);
     },
   },
   {

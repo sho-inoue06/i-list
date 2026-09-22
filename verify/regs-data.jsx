@@ -270,12 +270,16 @@ const SCENARIOS = [
   {
     id: "A4-applied-date",
     name: "同一なら継続車日、同一でないなら新型車日を適用し、どちらを適用しているかがセルで分かる",
-    expect: "DEMO-Q(PJ-1)×REG-N：同一→『継続車日を適用』で否、同一でない→『新型車日を適用』で申請発生、未確認→『新継どおり』。PJ-2では同じ型式・法規でも答えが割れる",
+    expect: "DEMO-Q(PJ-1)×REG-N：同一→『継続車日を適用』で否、同一でない→『新型車日を適用』で申請発生、未確認→『未確認のため安全側：…』。PJ-2では同じ型式・法規でも答えが割れる",
     async run({ mount, asserts }) {
       const c = await mountWith(mount);
       await chooseBase(c, "r202", "r201");
       await chooseBase(c, "r203", "r204");
-      asserts.checkTrue("未確認は新継どおり（申請発生）", cellText(c, "r202", "g201").includes("新継どおり") && cellText(c, "r202", "g201").includes("申請発生"));
+      // F-19 C3：比較元があって同一性が未回答のセルは、指定区分ではなく新型車側（安全側）で判定する。
+      // 画面もその理由を書く（「新継どおり」では切り替えた理由と反対の説明になる）。
+      asserts.checkTrue("未確認は安全側で新型車側（申請発生）",
+        cellText(c, "r202", "g201").includes("未確認のため安全側：") && cellText(c, "r202", "g201").includes("申請発生"));
+      asserts.checkTrue("未確認のセルに「新継どおり」とは書かない", !cellText(c, "r202", "g201").includes("新継どおり"));
       await editSame(c, "r202", "g201", { value: "同一" });
       let t = cellText(c, "r202", "g201");
       asserts.checkTrue("同一→継続車日を適用・否", t.includes("継続車日を適用") && t.includes("否") && !t.includes("申請発生"));
@@ -588,7 +592,8 @@ const SCENARIOS = [
       await editSame(c, "r202", "g202", { value: "同一でない" });
       asserts.checkTrue("このセルは要再確認を立てない", !hasRecheck(c, "r202", "g202"));
       await chooseBase(c, "r202", "r206");
-      asserts.checkTrue("比較元変更後は前の回答を使わない（新継どおり）", cellText(c, "r202", "g202").includes("新継どおり"));
+      asserts.checkTrue("比較元変更後は前の回答を使わない（未確認＝安全側で新型車側）",
+        cellText(c, "r202", "g202").includes("未確認のため安全側："));
       const td = () => cellAt(c, ROW.g202, COL.r202);
       td().querySelector('button[title="同一性を編集"]').click();
       await sleep(10);
@@ -647,8 +652,8 @@ const SCENARIOS = [
       // 要再確認の例は「同一性が効くセル」へ置いてある（r7×B・r7×C）
       asserts.checkTrue("r7×B 初回回答：要再確認・新型車日を適用",
         at(6, 2).includes("同一性：同一でない") && at(6, 2).includes("要再確認") && at(6, 2).includes("新型車日を適用"));
-      asserts.checkTrue("r7×C 未確認に戻した：要再確認・新継どおり",
-        at(6, 3).includes("同一性：未確認") && at(6, 3).includes("要再確認") && at(6, 3).includes("新継どおり"));
+      asserts.checkTrue("r7×C 未確認に戻した：要再確認・安全側で新型車側",
+        at(6, 3).includes("同一性：未確認") && at(6, 3).includes("要再確認") && at(6, 3).includes("未確認のため安全側："));
       asserts.checkTrue("手を付けていないセルは要再確認を出さない（r5×A）", !at(4, 0).includes("要再確認"));
       // 新型車日がLOより後のセルには同一性を出さない（比較元を選んでいても）
       asserts.check("同一性を出さないセル（r3×C・r7×E）",

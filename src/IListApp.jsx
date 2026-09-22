@@ -370,29 +370,43 @@ export const ORANGE = "#ff9f43";   // 要対応（赤・黄とは別系統の橙
 export const GRAY = "#9aabbd";     // drop済み・対象外（暗い背景でも読める灰）
 export const COMPLIANCE_STATES = ["対象外", "過去不適合", "drop済み", "法規不適合", "要対応"];
 
-export function complianceStateOf({ dueDate, drop, lo, decisionState, today = TODAY }) {
+// 決定表の出力を4状態の名前へ読み替えるだけの関数。**ここでは判定をしない。**
+// 呼ばれるのは「要・実績なし」と決まった申請発生セルだけ。決定表の出力との対応は1対1になる。
+//   超過でない     … 橙「要対応｜{期限}まで」（期限 = max（期日、LO）＝決定表の出力そのまま）＝法規適合必要
+//   超過・drop済み … 灰「過去に法規不適合（drop済み）」／「drop済み（対応対象外）」＝過去に法規不適合
+//   超過・生産中   … 赤「法規不適合」＝現在法規不適合
+// 開発中は構造上いちども超過にならないので、開発中のセルは必ず「要対応」側に入る。
+//
+// 「過去に法規不適合」と「drop済み（対応対象外）」の分けだけは決定表に項目が無いので、
+// 期日とドロップ日から決める。要になったセルは要否の式から必ず「期日 ≤ drop」が成り立つため、
+// 決定表が前提にする並び（LO < drop）では常に「過去に法規不適合」側になる。
+// 「期日 > drop」＝規制日が来る前にドロップしていた、は不自然なデータでしか起きない。
+// 判断できないとき（日付が読めない）は事実を残す側へ寄せる。
+// 文言は TEXT.compliance（F-18でまとめた辞書）から引く。
+export function complianceOfDecision(d, { lo, drop, dueDate, decisionState } = {}) {
   // 人の判断＝対象外は判定ではなく表示の上書き（決定表には人の判断という入力が無い）。
-  // 文言は TEXT.compliance（F-18でまとめた辞書）から引く。
   if (decisionState === "対象外") return { state:"対象外", label:TEXT.compliance.対象外(), color:GRAY };
-  const { 期限, 期限日, 規制日到来, LO到来 } = deadlineOf(dueDate, lo, today);
-  // 期日がこれから：期限 = max（期日、LO）を出す。LOのほうが後ならLOを出す（F-19 C6でここが変わった）。
-  if (!規制日到来) return 期限 === "LO"
+  if (!d.超過) return d.期限 === "LO"
     ? { state:"要対応", label:TEXT.compliance.要対応LO(lo), color:ORANGE }
-    : { state:"要対応", label:TEXT.compliance.要対応期日(期限日), color:ORANGE };
-  const dueDay = dateDayNumber(dueDate), dropDay = dateDayNumber(drop), todayDay = dateDayNumber(today);
-  // ドロップ済みかどうかは、生産フェーズではなく drop と今日だけで見る。
-  // LO ≤ drop（決定表が前提にする並び）ならこの2つは同じ結果になる。
-  // LO > drop という不自然なデータのときだけ差が出るので、F-14 の「判断できないときは事実を残す側」を保つ。
-  if (dropDay !== null && todayDay !== null && dropDay < todayDay) {
-    // 期日がドロップ日以前＝規制日を過ぎてもドロップまで生産を続けていた＝過去に不適合だった
-    const producedAfterDue = dueDay === null || dueDay <= dropDay;
+    : { state:"要対応", label:TEXT.compliance.要対応期日(d.期限日), color:ORANGE };
+  if (d.生産フェーズ === "drop済み") {
+    const dueDay = dateDayNumber(dueDate), dropDay = dateDayNumber(drop);
+    const producedAfterDue = dueDay === null || dropDay === null || dueDay <= dropDay;
     return producedAfterDue
       ? { state:"過去不適合", label:TEXT.compliance.過去不適合(), color:GRAY }
       : { state:"drop済み", label:TEXT.compliance.drop済み(), color:GRAY };
   }
-  // 期日は過ぎたがLOがまだ＝まだ世に出ていないので法規不適合にはせず、期限をLOで示す（F-14の5・C6でも同じ）。
-  if (!LO到来) return { state:"要対応", label:TEXT.compliance.要対応LO(lo), color:ORANGE };
   return { state:"法規不適合", label:TEXT.compliance.法規不適合(), color:RED };
+}
+
+// 決定表の出力を持っていない呼び出し側（同一性の行など）のための入口。
+// 決定表とまったく同じ deadlineOf / productionPhaseOf から同じ見方を作って上の関数へ渡すので、
+// 帳票セル（decideCell の出力から描く側）と結果が食い違うことは起こらない。
+export function complianceStateOf({ dueDate, drop, lo, decisionState, today = TODAY }) {
+  const dl = deadlineOf(dueDate, lo, today);
+  const view = { 超過: dl.超過, 期限: dl.期限, 期限日: dl.期限日,
+    生産フェーズ: productionPhaseOf(lo, drop, today) };
+  return complianceOfDecision(view, { lo, drop, dueDate, decisionState });
 }
 
 // 判定済みの結果（complianceStateOf の戻り値）をそのまま描く版。
@@ -1017,7 +1031,8 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
       const dec = decIdx ? findDecision(decIdx, run.key, reg.rid) : null;
       // 期日超過の4状態（F-14）。申請発生のセルにしか出ないので、それ以外は null。
       const compliance = auto.status === "leak"
-        ? complianceStateOf({ dueDate: auto.dueDate, drop: run.drop, lo: run.lo, decisionState: dec?.state, today })
+        ? complianceOfDecision(decision,
+            { lo: run.lo, drop: run.drop, dueDate: auto.dueDate, decisionState: dec?.state })
         : null;
       // 同一性（F-04）：比較元を選んだランの列だけに印を出す。
       const base = sameCtx ? sameCtx.base(run) : null;
@@ -2003,6 +2018,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                         <ComplianceLabel s={m.compliance} /></>}
                       {showSame && !isEditingSame &&
                         <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c} compliance={m.compliance}
+                          unconfirmedSide={m.decision.根拠未確認}
                           onOpen={base.state==="ok" ? ()=>{ setEditing(null); setEditDraft(null); setEditingSame({ runKey:run.key, rid:r.rid }); setSameDraft(null); } : null} />}
                       {isEditingSame &&
                         <SamenessEditor rec={sameRec} run={run} reg={r} base={base} hasCert={!!c.ck}
@@ -2154,19 +2170,26 @@ function BaseLabel({ base }) {
 
 // 「同一でない」は新型ランの式で判定する。この式は 新型車日≤LO でなければ 継続車日≤drop で要否を決めるため、
 // 実際に要になった日付の種類（auto.kind）で表示し、継続車日で要のセルを「新型車日を適用」と書かない。
-const appliedText = (auto, eff) =>
-  auto.applied === "継続車日" ? "継続車日を適用"
-  : auto.applied === "新型車日"
-    ? (!auto.required ? "新型車の式で判定"
-      : auto.kind === "新型" ? "新型車日を適用"
-      : "新型車の式で判定・継続車日で要")
-  : eff === "未確認" ? "新継どおり" : "";
+//
+// 未確認（比較元はあるが未回答）も F-19 C3 で新型車側に決まる（安全側）ので、同じ見方で書く。
+// 決定表の出力 根拠未確認 = はい がその状態なので、その値で分岐する（画面で判定をやり直さない）。
+// ここを「新継どおり」と書くと、指定区分が継のランで新型車側へ切り替えた理由と反対の説明になる。
+const appliedText = (auto, eff, 根拠未確認 = false) => {
+  const shinSide = (prefix) =>
+    !auto.required ? `${prefix}新型車の式で判定`
+    : auto.kind === "新型" ? `${prefix}新型車日を適用`
+    : `${prefix}新型車の式で判定・継続車日で要`;
+  if (auto.applied === "継続車日") return "継続車日を適用";
+  if (auto.applied === "新型車日") return shinSide("");
+  if (根拠未確認 || eff === "未確認") return shinSide("未確認のため安全側：");
+  return "";
+};
 
 // セル内の「同一性：」行。
 // compliance … 申請発生セルの4状態（F-14）。呼び出し側（MatrixView）が集約結果から渡す。
 // ここで complianceStateOf を呼び直さない（F-18・B1「セル描画の中で判定関数を呼ばない」）。
 // 申請発生でないセルでは null で渡ってくる。
-function SamenessLine({ rec, run, reg, base, auto, compliance, onOpen }) {
+function SamenessLine({ rec, run, reg, base, auto, compliance, unconfirmedSide = false, onOpen }) {
   const eff = effectiveSameness(rec, base);          // 無効な比較元なら null
   const shown = eff ?? "未確認";
   const stale = !!rec && rec.value !== "未確認" && eff === "未確認";
@@ -2192,7 +2215,7 @@ function SamenessLine({ rec, run, reg, base, auto, compliance, onOpen }) {
       <span style={{ fontSize:9, color:"#8fa3b8", lineHeight:1.5 }}>
         {base.state === "invalid" ? "比較元が無効のため新継どおり"
           : base.state === "none" ? "比較元が未選択のため新継どおり（比較元を選び直して答え直すと要再確認が消えます）"
-          : appliedText(auto, eff)}
+          : appliedText(auto, eff, unconfirmedSide)}
         {auto.required && auto.applied && auto.dueDate ? ` ${fmt(auto.dueDate)}` : ""}
         {auto.status === "leak" && compliance && <>{" "}<ComplianceLabel s={compliance} /></>}
         {stale && <span style={{ color:AMBER }}>（前の比較元への回答）</span>}

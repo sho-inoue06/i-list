@@ -284,7 +284,11 @@ const SCENARIOS = [
       asserts.check("LO未到来で期日より後なら、期日が先でもLOを示す", complianceStateOf({ dueDate: TOMORROW, drop: FAR, lo: LO_SOON }).label, L_UPCOMING(LO_SOON));
       asserts.check("LOのほうが先なら期日を示す", complianceStateOf({ dueDate: LO_SOON, drop: FAR, lo: TOMORROW }).label, L_UPCOMING(LO_SOON));
       asserts.check("LO未到来で期日が過去ならLOを示す", complianceStateOf({ dueDate: YESTERDAY, drop: FAR, lo: LO_SOON }).label, L_UPCOMING(LO_SOON));
-      asserts.check("LO未到来よりドロップ済みが優先", st(YESTERDAY, YESTERDAY, undefined, TOMORROW), "過去不適合");
+      // F-19：状態名も決定表の出力から作る（Codexレビュー指摘1の修正）。LO > drop は決定表が前提にする
+      // 並び（LO < drop）から外れたデータで、LOがまだ来ていない＝超過にならないので「要対応｜LOまで」になる。
+      // F-14では drop済みを優先して「過去不適合」にしていたが、それだと決定表の出力と画面が食い違う。
+      asserts.check("LO未到来はドロップ済みでも超過にしない", st(YESTERDAY, YESTERDAY, undefined, TOMORROW), "要対応");
+      asserts.check("LOが到来していればドロップ済みは過去不適合のまま", st(YESTERDAY, YESTERDAY, undefined, LONG_AGO), "過去不適合");
       asserts.check("LO未到来より人の対象外が優先", st(YESTERDAY, FAR, "対象外", TOMORROW), "対象外");
       asserts.check("LOが空なら到来済み側", st(YESTERDAY, FAR, undefined, ""), "法規不適合");
       asserts.check("LOが実在しない日付でも到来済み側", st(YESTERDAY, FAR, undefined, "2026-02-30"), "法規不適合");
