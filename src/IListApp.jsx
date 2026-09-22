@@ -75,58 +75,133 @@ export function todayStr(d = new Date()) {
 }
 export const TODAY = todayStr();
 
+// ───────────────────────────────────────────────
+// SEEDの相対日付（F-20）。**組み込みのダミーデータだけ**が使う。
+//
+// 固定日付のダミーデータは、時間が経つと主要な業務状態が消える（F-10の一覧が
+// 「危険な型式ランはありません」になる等）。そこで **SEEDの日付だけ** を
+// 「今日から ±n 日」で組み立て、いつ開いても同じ業務状態が見えるようにする。
+// 判定式・しきい値・抽出条件は一切変えていない（A6）。
+//
+//   ・効くのは SEED を使う新規起動だけ（A4）。埋め込み起動データ・読み込んだJSON・
+//     既存のサーバDBは、それぞれの絶対日付をそのまま使い、ここを通らない。
+//     空のサーバDBへ初回投入されたSEEDは、その時点の絶対日付として保存され、以後再計算されない。
+//   ・Date.UTC が月・年・うるう年の繰り上がりを正規化するので、戻り値は必ず実在する日付になる（A3）。
+//   ・同じ日に開き直せば同じ値になる（today が同じなら出力も同じ）。
+//   ・起点は端末ローカル日付（TODAY）＝F-13の「今日」と同じ暦日。
+// ───────────────────────────────────────────────
+export function seedDate(offsetDays, today = TODAY) {
+  const [y, m, d] = String(today).split("-").map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return "";
+  const t = new Date(Date.UTC(y, m - 1, d + offsetDays));
+  const p = (n) => String(n).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())}`;
+}
+
 // ダミーデータ（架空の型式・法規・認可書番号。実車・実データとは無関係）
-export const SEED = {
-  // プロジェクトコードは任意の識別記号（000A・000B…）。世代・前後関係は表さない。
-  //   000A：DEMO-0001 だけ
-  //   000B：DEMO-0001 が続き、途中で DEMO-0002 が追加される（LOが違う）
-  //   000C：両型式が続く。DEMO-0002 は装置変更で比較元と同一でなくなる
-  //   001A：別系統の DEMO-0003、途中で DEMO-0004 が追加される
-  runs:[
-    {key:"r1",typeId:"DEMO-0001",gen:"000A",sk:"新",lo:"2017-07-01",drop:"2019-12-31"},
-    {key:"r2",typeId:"DEMO-0001",gen:"000B",sk:"継",lo:"2020-01-01",drop:"2022-12-31"},
-    {key:"r3",typeId:"DEMO-0002",gen:"000B",sk:"新",lo:"2021-04-01",drop:"2022-12-31"},
-    {key:"r4",typeId:"DEMO-0001",gen:"000C",sk:"継",lo:"2023-01-01",drop:"2025-12-31"},
-    {key:"r5",typeId:"DEMO-0002",gen:"000C",sk:"継",lo:"2023-01-01",drop:"2025-12-31"},
-    {key:"r6",typeId:"DEMO-0003",gen:"001A",sk:"新",lo:"2026-01-01",drop:"2030-12-31"},
-    {key:"r7",typeId:"DEMO-0004",gen:"001A",sk:"新",lo:"2027-01-01",drop:"2030-12-31"},
-  ],
-  regs:[
-    {rid:"g1", id:"DEMO-REG-A",   label:"ダミー法規A",   shin:"2016-01-01",kei:"2018-01-01",parent:""},
-    {rid:"g2", id:"DEMO-REG-A2",  label:"ダミー法規A SU",shin:"2024-06-01",kei:"2026-06-01",parent:"DEMO-REG-A"},
-    {rid:"g3", id:"DEMO-REG-B",   label:"ダミー法規B（過渡規定の例）",shin:"2021-03-01",kei:"2023-10-01",parent:""},
-    {rid:"g4", id:"DEMO-REG-C",   label:"ダミー法規C",   shin:"2025-01-01",kei:"2027-01-01",parent:""},
-    {rid:"g5", id:"DEMO-REG-D",   label:"ダミー法規D",   shin:"2020-01-01",kei:"2022-01-01",parent:""},
-    {rid:"g6", id:"DEMO-REG-E",   label:"ダミー法規E",   shin:"2028-01-01",kei:"2029-01-01",parent:""},
-  ],
-  cert:{
-    "DEMO-0001": {"DEMO-REG-A":"DEMO*A00/00*01","DEMO-REG-B":"DEMO*B00/00*01","DEMO-REG-D":"DEMO*D00/00*01"},
-    "DEMO-0002": {"DEMO-REG-A":"DEMO*A00/00*02","DEMO-REG-D":"DEMO*D00/00*02"},
-    "DEMO-0003": {"DEMO-REG-A":"DEMO*A00/00*03","DEMO-REG-A2":"DEMO*A02/00*01","DEMO-REG-B":"DEMO*B00/00*02","DEMO-REG-D":"DEMO*D00/00*03","DEMO-REG-C":"DEMO*C00/00*01"},
-    "DEMO-0004": {"DEMO-REG-A":"DEMO*A00/00*04","DEMO-REG-A2":"DEMO*A02/00*02","DEMO-REG-D":"DEMO*D00/00*04"},
-  },
-  // 比較元・同一性（F-04）の例。単体版の初期表示だけが使う（API版はこの2つを持たない）。
-  //   r3×B 同一       … 継続車日を借りて「否」（新継どおりなら新型車日で期日到来）
-  //   r5×B 同一でない … 000Cで装置変更。新型車日（過去）で申請発生（dropも過去なので drop済み 表示）
-  //   r5×D 同一でない … LO≥継続車日なので結論は変わらず、要再確認も立たない（実績ありで緑。実績ありのセルは要再確認を出さない）
-  //   r7×B 同一でない … 初回回答で要再確認が立った例（同一と答えると継続車日2027/01へ、期日が変わる）
-  //   r7×C 未確認     … 同一から未確認へ戻した例。実績が無いので要再確認が残っている
-  //   記録を持たないセル（r3×A・r5×A・r7×A など）… 手を付けていない例。同一性：未確認・要再確認なし
-  // ※ 同一性の行は「新型車日 ≤ LO」のセルにしか出ない（答えても結論が変わらないセルには出さない）。
-  //    000BのC・E、000CのA2・C・E、001AのE などは、比較元を選んでいても同一性の行が出ない。
-  bases:[
-    {runKey:"r3",baseRunKey:"r2",decidedAt:"2026-09-19 10:00"},
-    {runKey:"r5",baseRunKey:"r4",decidedAt:"2026-09-19 10:00"},
-    {runKey:"r7",baseRunKey:"r6",decidedAt:"2026-09-19 10:00"},
-  ],
-  sameness:[
-    {runKey:"r3",rid:"g3",value:"同一",reason:"ダミー：比較元と装置は同じ",decidedAt:"2026-09-19 10:05",needsRecheck:false,baseRunKey:"r2"},
-    {runKey:"r5",rid:"g3",value:"同一でない",reason:"ダミー：000Cで装置を変更",decidedAt:"2026-09-19 10:06",needsRecheck:false,baseRunKey:"r4"},
-    {runKey:"r5",rid:"g5",value:"同一でない",reason:"ダミー：LO≥継続車日なので結論は変わらない",decidedAt:"2026-09-19 10:07",needsRecheck:false,baseRunKey:"r4"},
-    {runKey:"r7",rid:"g3",value:"同一でない",reason:"ダミー：初回の回答",decidedAt:"2026-09-19 10:08",needsRecheck:true,baseRunKey:"r6"},
-    {runKey:"r7",rid:"g4",value:"未確認",reason:"ダミー：確認し直すため未確認に戻した",decidedAt:"",needsRecheck:true,baseRunKey:""},
-  ],
-};
+//
+// 日付はすべて seedDate（今日からの相対日数）で作る。括弧内の数字は「今日から何日」。
+//
+// ■ 型式ランと生産フェーズ
+//   r1 DEMO-0001 000A 新  LO −3300 / drop −2450  … drop済み（いちばん古い指定）
+//   r2 DEMO-0001 000B 継  LO −2440 / drop −1350  … drop済み
+//   r3 DEMO-0002 000B 新  LO −1990 / drop −1350  … drop済み（000Bで型式追加。LOが違う）
+//   r4 DEMO-0001 000C 継  LO −1340 / drop −365  … drop済み（1年前にドロップした）
+//   r5 DEMO-0002 000C 継  LO −1340 / drop −365  … drop済み（同上。装置変更で比較元と同一でない）
+//   r6 DEMO-0003 001A 新  LO −190  / drop +150   … 生産中
+//   r7 DEMO-0004 001A 新  LO +120  / drop +1550  … 開発中（LOがまだ来ていない）
+//
+// ■ 業務状態 → セルの対応表（A1）。**偶然そうなっているデータにしない。**
+//   verify/seed-demo.html がこの表そのものを突き合わせ、崩れても増えてもFAILする（A8）。
+//   1 現在法規不適合   … r6×REG-C（生産中・実績なし・期限を190日超過）＝F-10に「不適合」で出る
+//   2 黄色予告         … r6×REG-E（dropの15日後に継続車規制）＝F-10に「予告」で出る
+//   3 法規適合必要     … r7×REG-B・r7×REG-C・r7×REG-E（要だが期限＝LOがまだ先＝橙「要対応」）
+//                        ＝現行F-10の定義どおり一覧には出さない
+//   4 過去に法規不適合 … r5×REG-B（規制日のあともドロップまで実績なしで生産していた）
+//                        ＝マトリクスには灰色で残るが、一覧には出さない
+//   5 実績あり         … DEMO-0001×REG-A が r1(000A)・r2(000B)・r4(000C) の3プロジェクトで緑（A5）ほか
+//   6 否（通常）       … r1×REG-B など
+//
+// ■ 危険一覧（F-10）に出るのは **drop前のラン（r6）だけ** にしてある（A2）。
+//   F-10の黄色予告は「dropの30日以内に継続車規制日が来る」セルにも出る仕様なので、
+//   drop済みのランでも、ドロップ直後に規制日が来るデータなら一覧に並ぶ。
+//   それ自体は仕様どおりだが、**開発中の現物確認では主役（生産中の赤と予告）がぼやける**ため、
+//   000C（r4・r5）のドロップを1年前に置き、どの法規の継続車規制日からも30日窓の外に出してある。
+//   判定式・抽出条件は変えていない（A6）。変えたのはSEEDの日付関係だけである。
+//   ＝ いま30日窓に入りうる継続車規制日は REG-A2(+200)・REG-C(+5)・REG-E(+165) の3つで、
+//      drop が窓に入るランは r6（drop +150 と REG-E の +165）だけになる。
+//
+// ■ 認証実績は 型式 × 法規 で1つ（プロジェクト別の認可番号欄は無い）。
+//   同じ型式×法規に番号があれば、その型式の全プロジェクトのランが実績ありになる（A5）。
+//
+// 「今日」を受け取る組み立て関数にしてある。**日付をここに直接書かないため**である
+// （固定日付を1つ混ぜても、その日は正しく見えてしまい、翌日から静かに意味を失う）。
+// 検証は別の「今日」で組み立て直し、全部の日付が同じだけ動くことを確かめられる（A3・A8）。
+export function buildSeed(today = TODAY) {
+  const d = (n) => seedDate(n, today);
+  return {
+    // プロジェクトコードは任意の識別記号（000A・000B…）。世代・前後関係は表さない。
+    //   000A：DEMO-0001 だけ
+    //   000B：DEMO-0001 が続き、途中で DEMO-0002 が追加される（LOが違う）
+    //   000C：両型式が続く。DEMO-0002 は装置変更で比較元と同一でなくなる
+    //   001A：別系統の DEMO-0003、途中で DEMO-0004 が追加される
+    runs:[
+      {key:"r1",typeId:"DEMO-0001",gen:"000A",sk:"新",lo:d(-3300),drop:d(-2450)},
+      {key:"r2",typeId:"DEMO-0001",gen:"000B",sk:"継",lo:d(-2440),drop:d(-1350)},
+      {key:"r3",typeId:"DEMO-0002",gen:"000B",sk:"新",lo:d(-1990),drop:d(-1350)},
+      {key:"r4",typeId:"DEMO-0001",gen:"000C",sk:"継",lo:d(-1340),drop:d(-365)},
+      {key:"r5",typeId:"DEMO-0002",gen:"000C",sk:"継",lo:d(-1340),drop:d(-365)},
+      {key:"r6",typeId:"DEMO-0003",gen:"001A",sk:"新",lo:d(-190), drop:d(150)},
+      {key:"r7",typeId:"DEMO-0004",gen:"001A",sk:"新",lo:d(120),  drop:d(1550)},
+    ],
+    // 法規の日付も相対。新型車適用日（shin）と継続車適用日（kei）の間隔は法規ごとに変えてある。
+    //   A  … どのランのLOより前に両方の日が来ている古い法規（実績で緑になる）
+    //   A2 … Aの後継（parent=A）。新型車日は過去、継続車日はこれから
+    //   B  … 000Bの型式追加をまたぐ法規（過渡規定の例。r3は同一で逃げ、r5は同一でないので過去に不適合）
+    //   C  … 生産中のランが取り漏らしている法規（新型車日は過去・継続車日は5日後）
+    //   E  … これから来る法規（新型車日はr7のLOより後なので、r7には同一性を出さない）
+    regs:[
+      {rid:"g1", id:"DEMO-REG-A",   label:"ダミー法規A",   shin:d(-3400),kei:d(-2800),parent:""},
+      {rid:"g2", id:"DEMO-REG-A2",  label:"ダミー法規A SU",shin:d(-700), kei:d(200),  parent:"DEMO-REG-A"},
+      {rid:"g3", id:"DEMO-REG-B",   label:"ダミー法規B（過渡規定の例）",shin:d(-2000),kei:d(-1200),parent:""},
+      {rid:"g4", id:"DEMO-REG-C",   label:"ダミー法規C",   shin:d(-300), kei:d(5),    parent:""},
+      {rid:"g5", id:"DEMO-REG-D",   label:"ダミー法規D",   shin:d(-2400),kei:d(-1700),parent:""},
+      {rid:"g6", id:"DEMO-REG-E",   label:"ダミー法規E",   shin:d(130),  kei:d(165),  parent:""},
+    ],
+    // 認可書実績（型式 × 法規）。DEMO-0003 は REG-C を取り漏らしている＝現在法規不適合の1件。
+    cert:{
+      "DEMO-0001": {"DEMO-REG-A":"DEMO*A00/00*01","DEMO-REG-B":"DEMO*B00/00*01","DEMO-REG-D":"DEMO*D00/00*01"},
+      "DEMO-0002": {"DEMO-REG-A":"DEMO*A00/00*02","DEMO-REG-D":"DEMO*D00/00*02"},
+      "DEMO-0003": {"DEMO-REG-A":"DEMO*A00/00*03","DEMO-REG-A2":"DEMO*A02/00*01","DEMO-REG-B":"DEMO*B00/00*02","DEMO-REG-D":"DEMO*D00/00*03"},
+      "DEMO-0004": {"DEMO-REG-A":"DEMO*A00/00*04","DEMO-REG-A2":"DEMO*A02/00*02","DEMO-REG-D":"DEMO*D00/00*04"},
+    },
+    // 比較元・同一性（F-04）の例。単体版の初期表示だけが使う（API版はこの2つを持たない）。
+    //   r3×B 同一       … 継続車日を借りて「否」（新継どおりなら新型車日で期日到来）
+    //   r5×B 同一でない … 000Cで装置変更。新型車日（過去）で申請発生（dropも過去なので 過去に法規不適合 表示）
+    //   r5×D 同一でない … LO≥継続車日なので結論は変わらず、要再確認も立たない（実績ありで緑。実績ありのセルは要再確認を出さない）
+    //   r7×B 同一でない … 初回回答で要再確認が立った例（同一と答えると継続車日へ、期日が変わる）
+    //   r7×C 未確認     … 同一から未確認へ戻した例。実績が無いので要再確認が残っている
+    //   記録を持たないセル（r3×A・r5×A・r7×A など）… 手を付けていない例。同一性：未確認・要再確認なし
+    // ※ 同一性の行は「新型車日 ≤ LO」のセルにしか出ない（答えても結論が変わらないセルには出さない）。
+    //    000BのC・E、000CのA2・C・E、001AのE などは、比較元を選んでいても同一性の行が出ない。
+    bases:[
+      {runKey:"r3",baseRunKey:"r2",decidedAt:`${d(-3)} 10:00`},
+      {runKey:"r5",baseRunKey:"r4",decidedAt:`${d(-3)} 10:00`},
+      {runKey:"r7",baseRunKey:"r6",decidedAt:`${d(-3)} 10:00`},
+    ],
+    sameness:[
+      {runKey:"r3",rid:"g3",value:"同一",reason:"ダミー：比較元と装置は同じ",decidedAt:`${d(-3)} 10:05`,needsRecheck:false,baseRunKey:"r2"},
+      {runKey:"r5",rid:"g3",value:"同一でない",reason:"ダミー：000Cで装置を変更",decidedAt:`${d(-3)} 10:06`,needsRecheck:false,baseRunKey:"r4"},
+      {runKey:"r5",rid:"g5",value:"同一でない",reason:"ダミー：LO≥継続車日なので結論は変わらない",decidedAt:`${d(-3)} 10:07`,needsRecheck:false,baseRunKey:"r4"},
+      {runKey:"r7",rid:"g3",value:"同一でない",reason:"ダミー：初回の回答",decidedAt:`${d(-3)} 10:08`,needsRecheck:true,baseRunKey:"r6"},
+      {runKey:"r7",rid:"g4",value:"未確認",reason:"ダミー：確認し直すため未確認に戻した",decidedAt:"",needsRecheck:true,baseRunKey:""},
+    ],
+  };
+}
+
+// 起動時のダミーデータ。モジュールの評価はページの読み込みごとに1回なので、
+// SEED＝そのページを開いた日の相対日付になる（TODAY と同じ考え方）。
+export const SEED = buildSeed();
 
 // サーバ応答が期待するデータ形 { runs:[], regs:[], cert:{} } かを判定する。
 // 配列も typeof は "object" になるため、cert は「nullでない・配列でないオブジェクト」であることまで確認する。
