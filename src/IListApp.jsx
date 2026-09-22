@@ -12,6 +12,35 @@ import { AlertTriangle, ShieldCheck, Minus, Activity, Pencil, Cpu, Plus, Trash2,
 export const INK="#0c1623", PANEL="#13202f", LINE="#22303f", CYAN="#4dd6e0", GREEN="#3fbf8f",
       RED="#ff6b57", MUTE="#5a6b7d", AMBER="#e0b24d";
 export const PALETTE=[CYAN,"#9d8cff",AMBER,GREEN,"#ff9e7d","#6db5ff","#d98cff"];
+
+// ───────────────────────────────────────────────
+// 表示文言の辞書（F-18）
+//
+// 画面に出る状態名・呼び名をここ1箇所にまとめる。判定・しきい値・色はここに置かない。
+//   ・判定は complianceStateOf ／ evalCellWith のまま。辞書は「その結果をどう呼ぶか」だけを持つ。
+//   ・色をここに置かないのは、色の定数がこのファイルの後半にもあり、モジュール評価の順序に
+//     縛られるため（文言＝この辞書、色＝各部品側、と分ける）。
+// 日付を含む文言は関数にする（整形は fmt に合わせる＝画面はどこでも YYYY/MM）。
+// fmt は関数宣言なので巻き上げられ、ここより後ろで定義されていても呼び出し時には使える。
+// ───────────────────────────────────────────────
+export const TEXT = {
+  // 申請発生セルの4状態（F-14）。帳票セル・コンプラ漏れ一覧・同一性の行が共有する。
+  compliance: {
+    対象外:    () => "対象外（判断済み）",
+    要対応期日: (dueDate) => `要対応｜${fmt(dueDate)}まで`,
+    要対応LO:  (lo) => `要対応｜${fmt(lo)}まで`,
+    過去不適合: () => "過去に法規不適合（drop済み）",
+    drop済み:  () => "drop済み（対応対象外）",
+    法規不適合: () => "法規不適合",
+  },
+  // セルの自動判定（要否）の呼び名。
+  cell: {
+    否:       "否",
+    否要再確認: "否・要再確認",          // F-15の黄色（ドロップ後30日以内にこれから継続規制）
+    要:       "要",
+    申請発生:   "申請発生",
+  },
+};
 // 「今日」（F-13）。画面を開いた／再読み込みした時点の端末ローカル日付を使う。
 // ・モジュール評価はページの読み込みごとに1回なので、TODAY＝そのページを開いた日になる。
 // ・日をまたいで開きっぱなしの場合は自動更新しない（再読み込みで更新する）。
@@ -207,32 +236,37 @@ export const GRAY = "#9aabbd";     // drop済み・対象外（暗い背景で�
 export const COMPLIANCE_STATES = ["対象外", "過去不適合", "drop済み", "法規不適合", "要対応"];
 
 export function complianceStateOf({ dueDate, drop, lo, decisionState, today = TODAY }) {
-  if (decisionState === "対象外") return { state:"対象外", label:"対象外（判断済み）", color:GRAY };
+  // 文言は TEXT.compliance（F-18でまとめた辞書）から引く。判定・優先順位・色は変えていない。
+  if (decisionState === "対象外") return { state:"対象外", label:TEXT.compliance.対象外(), color:GRAY };
   const todayDay = dateDayNumber(today);
   const dueDay = dateDayNumber(dueDate);
   const passed = dueDay === null || todayDay === null ? true : dueDay <= todayDay;
-  if (!passed) return { state:"要対応", label:`要対応｜${fmt(dueDate)}まで`, color:ORANGE };
+  if (!passed) return { state:"要対応", label:TEXT.compliance.要対応期日(dueDate), color:ORANGE };
   const dropDay = dateDayNumber(drop);
   if (dropDay !== null && todayDay !== null && dropDay < todayDay) {
     // 期日がドロップ日以前＝規制日を過ぎてもドロップまで生産を続けていた＝過去に不適合だった
     const producedAfterDue = dueDay === null || dueDay <= dropDay;
     return producedAfterDue
-      ? { state:"過去不適合", label:"過去に法規不適合（drop済み）", color:GRAY }
-      : { state:"drop済み", label:"drop済み（対応対象外）", color:GRAY };
+      ? { state:"過去不適合", label:TEXT.compliance.過去不適合(), color:GRAY }
+      : { state:"drop済み", label:TEXT.compliance.drop済み(), color:GRAY };
   }
   const loDay = dateDayNumber(lo);
   if (loDay !== null && todayDay !== null && loDay > todayDay) {
-    return { state:"要対応", label:`要対応｜${fmt(lo)}まで`, color:ORANGE };
+    return { state:"要対応", label:TEXT.compliance.要対応LO(lo), color:ORANGE };
   }
-  return { state:"法規不適合", label:"法規不適合", color:RED };
+  return { state:"法規不適合", label:TEXT.compliance.法規不適合(), color:RED };
 }
 
-// 3か所（帳票セル・コンプラ漏れ一覧・同一性の行）で同じ状態名・色を使うための表示部品。
-export function ComplianceStateText({ dueDate, drop, lo, decisionState, fontSize = 9 }) {
-  const s = complianceStateOf({ dueDate, drop, lo, decisionState });
+// 判定済みの結果（complianceStateOf の戻り値）をそのまま描く版。
+// 呼び出し側がすでに結果を持っているときはこちらを使う（F-18：判定は1箇所で作り、画面は描くだけにする）。
+export function ComplianceLabel({ s, fontSize = 9 }) {
   return (
     <span style={{ fontSize, fontWeight: s.state === "法規不適合" ? 800 : 700, color: s.color }}>{s.label}</span>
   );
+}
+// 結果を持っていない呼び出し側（同一性の行など）のための版。判定はここでも complianceStateOf に任せる。
+export function ComplianceStateText({ dueDate, drop, lo, decisionState, fontSize = 9 }) {
+  return <ComplianceLabel s={complianceStateOf({ dueDate, drop, lo, decisionState })} fontSize={fontSize} />;
 }
 
 // 帳票の集計（漏れ一覧と実効ドロップ）。判定は evalCellWith を使う。
@@ -791,6 +825,69 @@ export function makeBasisContext(runs, sameCtx = null) {
       return m.get(reg);
     },
   };
+}
+
+// ───────────────────────────────────────────────
+// 全セル（型式ラン × 法規行）の判定結果をまとめて作る（F-18）
+//
+// 目的：判定の二重実装を、規約ではなく構造で不可能にする。
+// セル1つぶんの結果を作る場所をここ1箇所にし、**画面（マトリクスのセル・コンプラ漏れ一覧）は
+// この結果を描くだけ**にする。描画の中で evalCell / approachingNoticeFor / complianceStateOf を
+// 呼び直さないので、画面ごとに条件がずれることが起きない。
+//
+// ここでは新しい判定をしない。既存の関数（要否＝evalCell、接近予告＝F-15、状態＝F-14、
+// 同一性＝F-04、根拠＝F-12）を呼んで、その結果を1つのオブジェクトにまとめるだけ。
+//
+//   evalCell  … 呼び出し側の判定関数（API版は認可書だけ、単体版は同一性つき）。ここでは呼ぶだけで作らない
+//   decisions … 人の適用判断。配列を渡したときだけ dec を持つ（API版は渡さない＝null のまま）
+//   sameCtx   … 同一性（F-04・単体版のみ）。省略時は same 系が null
+//   basisCtx  … 根拠（F-12・単体版のみ）。省略時は basis が null
+//
+// 戻り値
+//   list          … 全セルの結果（runs の順 × regs の順）
+//   get(run, reg) … 1セルの結果（無ければ null）
+//
+// 索引のキーは **型式ラン・法規行のオブジェクトそのもの**にする（rid や run.key の文字列では引かない）。
+// 文字列で覚えると、キーが重複しているデータで別の行の結果に上書きされ、
+// 「セルごとにその場で判定していたとき」と違う結果を描いてしまう。
+// API版の読込（isValidData ＋ planRegKeys）は形だけを見るので、重複した rid・key を受理しうる。
+// 同じ理由で makeBasisContext も行オブジェクトをキーにしている（F-12のレビュー指摘1）。
+// ───────────────────────────────────────────────
+export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx = null, basisCtx = null, today = TODAY }) {
+  const judge = Array.isArray(decisions);
+  const decIdx = judge ? decisionIndex(decisions) : null;
+  const byRun = new Map();   // run（オブジェクト）→ reg（オブジェクト）→ セルの結果
+  const list = [];
+  for (const run of runs || []) {
+    const m = new Map();
+    for (const reg of regs || []) {
+      const auto = evalCell(run, reg);
+      // 黄色は判定式(evalCellWith)の外で計算する注記。status="off"以外には出さない。
+      const notice = approachingNoticeFor(auto.status, run, reg, today);
+      // 人の適用判断（判断機能が無い版では null のまま＝何も描画しない）
+      const dec = decIdx ? findDecision(decIdx, run.key, reg.rid) : null;
+      // 期日超過の4状態（F-14）。申請発生のセルにしか出ないので、それ以外は null。
+      const compliance = auto.status === "leak"
+        ? complianceStateOf({ dueDate: auto.dueDate, drop: run.drop, lo: run.lo, decisionState: dec?.state, today })
+        : null;
+      // 同一性（F-04）：比較元を選んだランの列だけに印を出す。
+      const base = sameCtx ? sameCtx.base(run) : null;
+      // 比較元が未選択でも、回答や要再確認が残っているセルには出す（警告を隠さない）
+      const sameRec = sameCtx ? sameCtx.rec(run, reg) : null;
+      const sameness = sameCtx ? sameCtx.effective(run, reg) : null;
+      // 同一性の答えで判定が何も変わらないセルには、行そのものを出さない（選ばせない）。
+      // 保存済みの回答・要再確認は記録としては残るが、画面には出さない（2026-09-20 祥の判断）。
+      const showSame = !!base && samenessAffects(run, reg) && (base.state !== "none" ||
+        (!!sameRec && (sameRec.needsRecheck || sameRec.value !== "未確認")));
+      // 根拠（F-12）：継続車日を借りているセルだけ。判定・色・期日・要再確認には一切関与しない。
+      const basis = basisCtx ? basisCtx.of(run, reg) : null;
+      const entry = { run, reg, auto, notice, dec, compliance, base, sameRec, sameness, showSame, basis };
+      m.set(reg, entry);
+      list.push(entry);
+    }
+    byRun.set(run, m);
+  }
+  return { list, get: (run, reg) => byRun.get(run)?.get(reg) || null };
 }
 
 // 採番の上限。生成できる範囲と読み込める範囲を同じ値にそろえる。
@@ -1594,7 +1691,6 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
   // （MatrixView 自体はアンマウントされない）入力途中の理由・選択が保持され、再表示で戻る。
   // 保存対象データ・dirty には一切関与しない。明示保存／キャンセル／成功読込で捨てる。
   const [editDraft, setEditDraft] = useState(null); // { runKey, rid, state, reason } | null
-  const decIndex = useMemo(() => decisionIndex(decisions || []), [decisions]);
   // データが丸ごと差し替わったら（＝読込が成功したら）開いている編集領域を閉じる。
   // 編集領域は開いた時点の理由を自分の中に持つため、開いたまま置換すると
   // 古い理由を新しい判断へ書き戻せてしまう。
@@ -1617,6 +1713,15 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
   // 選択候補は「元の全データ」から重複を除く（表示中の列からではない）
   const projectOptions = useMemo(() => [...new Set(runs.map((r) => r.gen))], [runs]);
   const typeOptions = useMemo(() => [...new Set(runs.map((r) => r.typeId))], [runs]);
+  // 全セルの判定結果（F-18）。帳票のセルもコンプラ漏れ一覧も、ここで作った結果だけを描く。
+  // 表示フィルターで隠れている列も作る（フィルターは描く側で効かせる）。
+  // evalCell は呼び出し側で毎描画つくり直される関数なので、実質は毎描画の計算になる（従来のセル内計算と同じ）。
+  // ※ 新しいフックは既存フックより後ろに置く（既存の呼び出し順を動かさないため）。
+  const model = useMemo(
+    () => buildCellModel({ runs, regs, evalCell, decisions: judge ? decisions : null, sameCtx, basisCtx }),
+    [runs, regs, evalCell, decisions, judge, sameCtx, basisCtx]);
+  // コンプラ漏れ一覧に並べる行。判定はせず、集約結果から「申請発生」のセルを拾うだけ（F-18・B1）。
+  const leakRows = useMemo(() => model.list.filter((m) => m.auto.status === "leak"), [model]);
   const filterActive = filterable && (selProjects.length > 0 || selTypes.length > 0);
   // 欄内OR・欄間AND・完全一致。未選択の欄は制限なし。列順は runs の順を保つ。
   // 同じ (gen, typeId) のランが複数あっても、条件に合えば全ランを残す（重複排除しない）。
@@ -1695,40 +1800,33 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                   <div style={{ fontSize:9, color:MUTE, fontFamily:"ui-monospace,monospace", paddingLeft:r.parent?8:0, marginTop:2 }}>新{fmt(r.shin)}・継{fmt(r.kei)}</div>
                 </td>
                 {visibleRuns.map(run=>{
-                  const c=evalCell(run,r);
-                  // 黄色は判定式(evalCellWith)の外で計算する注記。status="off"以外には出さない。
-                  const notice = approachingNoticeFor(c.status, run, r);
+                  // セルの中身は buildCellModel が作った結果をそのまま描く（判定はここでやり直さない・F-18）。
+                  //   c      … 要否・種別・認可書・期日（evalCellWith）
+                  //   notice … F-15の黄色の接近予告（status="off"以外には出ない）
+                  //   dec    … 人の適用判断（判断機能が無い版では null）
+                  //   base / sameRec / showSame … 同一性（F-04）。showSame は答えが判定を変えるセルだけ true
+                  //   basis  … 根拠（F-12）。判定・色・期日・要再確認には一切関与しない
+                  const m = model.get(run, r);
+                  const c = m.auto, notice = m.notice, dec = m.dec, base = m.base, sameRec = m.sameRec, basis = m.basis;
                   const st=cellStyle(c.status, !!notice);
-                  // 人の適用判断（propsが無ければ null のまま＝何も描画しない）
-                  const dec = judge ? findDecision(decIndex, run.key, r.rid) : null;
                   const isEditing = judge && editing && editing.runKey===run.key && editing.rid===r.rid;
-                  // 同一性（F-04）：比較元を選んだランの列だけに印を出す
-                  const base = sameCtx ? sameCtx.base(run) : null;
-                  // 比較元が未選択でも、回答や要再確認が残っているセルには出す（警告を隠さない）
-                  const sameRec = sameCtx ? sameCtx.rec(run, r) : null;
-                  // 同一性の答えで判定が何も変わらないセルには、行そのものを出さない（選ばせない）。
-                  // 保存済みの回答・要再確認は記録としては残るが、画面には出さない（2026-09-20 祥の判断）。
-                  const showSame = !!base && samenessAffects(run, r) && (base.state!=="none" ||
-                    (!!sameRec && (sameRec.needsRecheck || sameRec.value!=="未確認")));
+                  const showSame = m.showSame;
                   const isEditingSame = showSame && editingSame && editingSame.runKey===run.key && editingSame.rid===r.rid;
-                  // 根拠（F-12）：継続車日を借りているセルだけ、根拠文か根拠未確認の印を出す。
-                  // 判定・色・期日・要再確認には一切関与しない（表示だけ）。
-                  const basis = basisCtx ? basisCtx.of(run, r) : null;
                   return (
                   <td key={run.key} style={{ padding:0 }}>
                     <div style={{ background:st.bg, border:`1px solid ${st.bd}`, borderRadius:7, padding:"7px 8px", minHeight:48, display:"flex", flexDirection:"column", justifyContent:"center", gap:2 }}>
-                      {c.status==="off" && !notice && <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><Minus size={12}/><span style={{ fontSize:11 }}>否</span></div>}
+                      {c.status==="off" && !notice && <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><Minus size={12}/><span style={{ fontSize:11 }}>{TEXT.cell.否}</span></div>}
                       {c.status==="off" && notice && <>
-                        <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:700 }}>否・要再確認</span></div>
+                        <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:700 }}>{TEXT.cell.否要再確認}</span></div>
                         <span style={{ fontSize:9, color:st.fg }}>継続規制まで{notice.days}日（{fmt(notice.keiDate)}・延長時は再確認）</span></>}
                       {c.status==="ok" && <>
-                        <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><ShieldCheck size={12}/><span style={{ fontSize:10.5, fontWeight:700 }}>要</span><Badge kind={c.kind}/></div>
+                        <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><ShieldCheck size={12}/><span style={{ fontSize:10.5, fontWeight:700 }}>{TEXT.cell.要}</span><Badge kind={c.kind}/></div>
                         <span style={{ fontFamily:"ui-monospace,monospace", fontSize:9, color:"#bfe9d8" }}>{c.ck}</span></>}
                       {c.status==="leak" && <>
-                        <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:800 }}>申請発生</span><Badge kind={c.kind}/></div>
-                        <ComplianceStateText dueDate={c.dueDate} drop={run.drop} lo={run.lo} decisionState={dec?.state} /></>}
+                        <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:800 }}>{TEXT.cell.申請発生}</span><Badge kind={c.kind}/></div>
+                        <ComplianceLabel s={m.compliance} /></>}
                       {showSame && !isEditingSame &&
-                        <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c} decisionState={dec?.state}
+                        <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c} compliance={m.compliance}
                           onOpen={base.state==="ok" ? ()=>{ setEditing(null); setEditDraft(null); setEditingSame({ runKey:run.key, rid:r.rid }); setSameDraft(null); } : null} />}
                       {isEditingSame &&
                         <SamenessEditor rec={sameRec} run={run} reg={r} base={base} hasCert={!!c.ck}
@@ -1812,16 +1910,19 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
       )}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:13, marginTop:filterActive?8:22 }}>
         <Card title="コンプラ漏れ（自動検出）" icon={<AlertTriangle size={15} color={RED}/>}>
-          {summary.leaks.length===0 ? <p style={{ color:GREEN, fontSize:12.5, margin:0 }}>漏れなし。</p> :
-            summary.leaks.map((l,i)=>{
+          {/* 並べる行も状態も、帳票セルと同じ集約結果（buildCellModel）から作る（F-18・B1）。
+              ここでは判定をやり直さない。抽出条件・並び順は summarize と同じ
+              （runs の順 × regs の順に status==="leak" を拾う）ため、出る行と順序は従来と変わらない。
+              表示フィルターの影響は受けず、全列を対象にするのも従来どおり（model は runs 全件で作っている）。 */}
+          {leakRows.length===0 ? <p style={{ color:GREEN, fontSize:12.5, margin:0 }}>漏れなし。</p> :
+            leakRows.map((m,i)=>{
               // drop済み・対象外の行も一覧から外さず、灰色の行として残す（F-14）。
-              const ds = judge ? findDecision(decIndex, l.run.key, l.rid)?.state : undefined;
-              const dim = complianceStateOf({ dueDate:l.dueDate, drop:l.run.drop, lo:l.run.lo, decisionState:ds }).color === GRAY;
+              const dim = m.compliance.color === GRAY;
               return (
-              <div key={i} style={{ fontSize:12, padding:"5px 0", borderBottom:i<summary.leaks.length-1?`1px solid ${LINE}`:"none" }}>
-                <span style={{ fontFamily:"ui-monospace,monospace", color:dim?GRAY:"#eef4fa" }}>{l.run.typeId}</span>
-                <span style={{ color:"#6b7d90", fontSize:11 }}>（{l.run.gen}）</span> × <span style={{ color:dim?GRAY:"#eef4fa" }}>{l.reg}</span>
-                <Badge kind={l.kind}/>{" "}<ComplianceStateText dueDate={l.dueDate} drop={l.run.drop} lo={l.run.lo} decisionState={ds} fontSize={11} />
+              <div key={i} style={{ fontSize:12, padding:"5px 0", borderBottom:i<leakRows.length-1?`1px solid ${LINE}`:"none" }}>
+                <span style={{ fontFamily:"ui-monospace,monospace", color:dim?GRAY:"#eef4fa" }}>{m.run.typeId}</span>
+                <span style={{ color:"#6b7d90", fontSize:11 }}>（{m.run.gen}）</span> × <span style={{ color:dim?GRAY:"#eef4fa" }}>{m.reg.id}</span>
+                <Badge kind={m.auto.kind}/>{" "}<ComplianceLabel s={m.compliance} fontSize={11} />
               </div>);})}
         </Card>
         <Card title="実効ドロップ（規制で縛られる期限）" icon={<Activity size={15} color={CYAN}/>}>
@@ -1880,7 +1981,10 @@ const appliedText = (auto, eff) =>
   : eff === "未確認" ? "新継どおり" : "";
 
 // セル内の「同一性：」行。
-function SamenessLine({ rec, run, reg, base, auto, decisionState, onOpen }) {
+// compliance … 申請発生セルの4状態（F-14）。呼び出し側（MatrixView）が集約結果から渡す。
+// ここで complianceStateOf を呼び直さない（F-18・B1「セル描画の中で判定関数を呼ばない」）。
+// 申請発生でないセルでは null で渡ってくる。
+function SamenessLine({ rec, run, reg, base, auto, compliance, onOpen }) {
   const eff = effectiveSameness(rec, base);          // 無効な比較元なら null
   const shown = eff ?? "未確認";
   const stale = !!rec && rec.value !== "未確認" && eff === "未確認";
@@ -1908,7 +2012,7 @@ function SamenessLine({ rec, run, reg, base, auto, decisionState, onOpen }) {
           : base.state === "none" ? "比較元が未選択のため新継どおり（比較元を選び直して答え直すと要再確認が消えます）"
           : appliedText(auto, eff)}
         {auto.required && auto.applied && auto.dueDate ? ` ${fmt(auto.dueDate)}` : ""}
-        {auto.status === "leak" && <>{" "}<ComplianceStateText dueDate={auto.dueDate} drop={run.drop} lo={run.lo} decisionState={decisionState} /></>}
+        {auto.status === "leak" && compliance && <>{" "}<ComplianceLabel s={compliance} /></>}
         {stale && <span style={{ color:AMBER }}>（前の比較元への回答）</span>}
       </span>
     </div>
