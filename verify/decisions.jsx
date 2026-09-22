@@ -24,7 +24,7 @@ import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
-  parseImportedData, replaceBootData, readBootData,
+  parseImportedData, replaceBootData, readBootData, evalCellWith,
   parentLinkOf, condOf, condEquals, sweepRecheck, normalizeDecisions,
   markRunNeedsRecheck, pruneDecisionsByRun, pruneDecisionsByReg, upsertDecision,
   DECISION_STATES, peekIds, resetIds,
@@ -992,6 +992,59 @@ const SCENARIOS = [
         asserts.checkTrue("申請発生の表示", cellText(c,1,0).includes("申請発生"));
         asserts.checkTrue("保存状態の表示（サーバ保存済み）", c.textContent.includes("サーバに保存済み"));
       } finally {
+        api.restore();
+      }
+    },
+  },
+  {
+    id: "D17-duplicate-rid-cells",
+    name: "法規行の内部キー(rid)が重複していても、各行が自分の判定を出す",
+    expect: "同じ rid の法規2行に対し、1行目は赤い「申請発生」、2行目は灰色の「否」。互いの判定で上書きされない",
+    async run({ mountApi, asserts }) {
+      // F-18のCodexレビュー指摘1の回帰ケース。
+      // 全セルの判定を1箇所でまとめて作る（buildCellModel）ようにしたとき、
+      // 索引を rid の文字列で持つと、rid が重複したデータで後の行が前の行を上書きし、
+      // 「セルごとにその場で判定していたとき」と違う結果を描いてしまう。
+      // API版の読込（isValidData ＋ planRegKeys）は形だけを見るので、重複した rid を受理する
+      // （単体版のJSON読込は parseImportedData が拒否するため、この経路はAPI版でしか起きない）。
+      // 日付はすべて固定で、端末の「今日」に依存しない（新型車日≤LO で要／どちらの日も届かず否）。
+      const dup = {
+        runs: [{ key: "r901", typeId: "DEMO-DUP", gen: "PJ-D", sk: "新", lo: "2025-01-01", drop: "2030-12-31" }],
+        regs: [
+          { rid: "g901", id: "DUP-A", label: "ダミー重複A", shin: "2020-01-01", kei: "2020-01-01", parent: "" },
+          { rid: "g901", id: "DUP-B", label: "ダミー重複B", shin: "2040-01-01", kei: "2040-01-01", parent: "" },
+        ],
+        cert: {},
+      };
+      // 判定式そのものの期待値（画面と突き合わせる基準。ここは集約の影響を受けない）
+      asserts.check("判定式：1行目は要・実績なし＝申請発生", evalCellWith({}, dup.runs[0], dup.regs[0]).status, "leak");
+      asserts.check("判定式：2行目は否", evalCellWith({}, dup.runs[0], dup.regs[1]).status, "off");
+      const api = installApiMock(clone(dup));
+      // 重複した rid は React の行キーにも使われるので、この不正データでは
+      // 「同じキーの子が2つある」という警告が必ず出る（製品の通常動作では出ない）。
+      // 他のケースのconsole計測を汚さないよう、このケースの間だけ受け止めて、
+      // 出たのが想定どおりの警告だけであることを確かめる。
+      const realError = console.error;
+      const captured = [];
+      console.error = (...a) => { captured.push(a.map(String).join(" ")); };
+      try {
+        const app = mountApi();
+        await sleep(1300);
+        const c = app.container;
+        console.error = realError;
+        asserts.checkTrue("出たconsoleエラーはReactの重複キー警告だけ（不正データゆえに想定どおり）",
+          captured.length > 0 && captured.every((m) => m.includes("two children with the same key")));
+        asserts.check("法規2行ぶんのセルが出る", c.querySelectorAll("tbody tr").length, 2);
+        asserts.checkTrue("1行目は申請発生", cellText(c, 0, 0).includes("申請発生"));
+        asserts.checkTrue("2行目は否（申請発生ではない）",
+          cellText(c, 1, 0).includes("否") && !cellText(c, 1, 0).includes("申請発生"));
+        asserts.check("1行目の枠色は赤", cellBorder(c, 0, 0), RED_RGB);
+        asserts.checkTrue("2行目の枠色は赤でない", cellBorder(c, 1, 0) !== RED_RGB);
+        const times = (t) => c.textContent.split(t).length - 1;
+        asserts.check("コンプラ漏れ一覧に出るのは1行目だけ（行見出しの分を含む出現回数）",
+          [times("DUP-A"), times("DUP-B")], [2, 1]);
+      } finally {
+        console.error = realError;
         api.restore();
       }
     },
