@@ -418,7 +418,13 @@ const SCENARIOS = [
       // 危険でないセルは帳票に残り、一覧には出ない
       asserts.checkTrue("帳票 TYPE-3×REG-OVERDUE は過去に法規不適合のまま残る", matrixCell(c, ROW.g501, COL.r503).includes(L_PAST));
       asserts.check("一覧には TYPE-3 が無い", groupTypeIds(c).includes("TYPE-3"), false);
-      asserts.check("一覧に過去に法規不適合の文言が無い", panelEl(c).textContent.includes(L_PAST), false);
+      asserts.check("一覧の表に過去に法規不適合の行が無い", riskTable(c).textContent.includes(L_PAST), false);
+      // A5：凡例の状態名も辞書から引いていること（辞書と二重管理になっていないことの確認）。
+      // 状態名を書き換えたダミー辞書を使う手が無いので、辞書の値がそのまま凡例に出ていることで代用する。
+      const legend = panelEl(c).textContent;
+      asserts.checkTrue("凡例に辞書の「法規不適合」が出ている", legend.includes(L_VIOLATION));
+      asserts.checkTrue("凡例に辞書の「否・要再確認」が出ている", legend.includes(L_YELLOW));
+      asserts.checkTrue("凡例に辞書の「過去に法規不適合（drop済み）」が出ている", legend.includes(L_PAST));
     },
   },
   {

@@ -2090,12 +2090,15 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
             </table>
           </div>
           </>)}
+          {/* 凡例。状態名は辞書から引く（ここで文字列を書くと、辞書を直したときに説明だけ古い名前が残る）。
+              「要対応」は辞書が日付つきの文言しか持たない（TEXT.compliance.要対応期日／要対応LO）ので、
+              その族の呼び名としてかぎ括弧で書いている。 */}
           <div style={{ marginTop:8, fontSize:10, color:MUTE, lineHeight:1.7 }}>
-            並ぶのは <b style={{ color:RED }}>法規不適合（いま生産中・期限を過ぎている・実績なし）</b> と
-            <b style={{ color:AMBER }}>否・要再確認（ドロップ後30日以内にこれから継続規制が来る）</b> の
-            2つだけです。<b>これから対応する「要対応」と、drop済みの「過去に法規不適合」は出しません</b>
+            並ぶのは <b style={{ color:RED }}>{TEXT.compliance.法規不適合()}（いま生産中・期限を過ぎている・実績なし）</b> と
+            <b style={{ color:AMBER }}>{TEXT.cell.否要再確認}（ドロップ後30日以内にこれから継続規制が来る）</b> の
+            2つだけです。<b>これから対応する「要対応」の分と、{TEXT.compliance.過去不適合()}は出しません</b>
             （前者は件数が多すぎて検出の意味がなくなり、後者はいま手を打てないため）。
-            まだラインオフしていないランは期限がLOになるため、法規不適合では出ません。
+            まだラインオフしていないランは期限がLOになるため、{TEXT.compliance.法規不適合()}では出ません。
             ドロップ済みのランでも、<b>ドロップ直後にこれから継続規制が来る</b>場合は予告として出ます（ドロップが延びれば引っかかるため）。
             状態・規制日・期限は<b>帳票のセルとまったく同じ判定結果</b>で、ここでは束ねて並べているだけです。
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><SamenessUnknownMark title={MARK_TITLE} /></span>
