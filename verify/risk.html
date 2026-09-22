@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>危険な型式ランの一覧（F-10） 検証ハーネス（ダミー専用）</title>
+    <style>html, body { margin: 0; min-height: 100%; } body { background: #0c1623; }</style>
+  </head>
+  <body>
+    <!--
+      F-10（危険な型式ランの一覧・検出ビュー）の検証ページ。ダミーデータのみ。
+      実APIサーバ・実DB（data/ilist.db）には接続しない（API版のケースは fetch をモックする）。
+
+      期待値に固定日付を書かない。実行時の端末ローカル日付から前後の日をつくって確認する
+      （基準日を固定する手段を製品にも検証設定にも持たないため。F-13と同じ方針）。
+
+      実行方法（npm run dev は使わない：APIサーバと既存DBを開いてしまうため）：
+        node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
+        → http://127.0.0.1:5173/verify/risk.html
+    -->
+    <div id="runner"></div>
+    <script type="module" src="/verify/risk.jsx"></script>
+  </body>
+</html>
