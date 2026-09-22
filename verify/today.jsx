@@ -258,15 +258,18 @@ const SCENARIOS = [
   },
   {
     id: "A2A3A4-sameness-overdue",
-    name: "同一性の行：同一でないで新型車日が前日・当日なら期日到来側、翌日は期日がこれから側（F-14で「期限超過」は廃止）",
-    expect: "DEMO-W の3セルで、前日・当日はLOの年月を期限に出し、翌日は期日（翌日）の年月を期限に出す。どのセルにも「期限超過」は出ない",
+    name: "同一性の行：同一でないで新型車日が前日・当日・翌日のいずれでも、期限は max（期日、LO）になる",
+    expect: "DEMO-W の3セルとも、LO（60日先）が期日より後なのでLOの年月を期限に出す。どのセルにも「期限超過」は出ない",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, SAME_DUMMY);
       const col = 1;   // DEMO-W（比較元を選んだ側）
-      asserts.check("前日・当日は期日到来側（LOの年月）",
-        [0, 1].map((r) => cellText(c, r, col).includes(`要対応｜${fmt(LO_LATER)}まで`)), [true, true]);
-      asserts.checkTrue("翌日は期日がこれから側（期日の年月）", cellText(c, 2, col).includes(`要対応｜${fmt(TOMORROW)}まで`));
-      asserts.checkTrue("翌日にLOの年月は出さない（A3）", !cellText(c, 2, col).includes(`要対応｜${fmt(LO_LATER)}まで`));
+      // F-19 C6：期限 = max（適用した規制日、LO）。このランはLOが60日先なので、
+      // 期日が前日でも当日でも翌日でも、期限はLOになる。
+      // （F-14では「期日がこれからのセルは期日を出す」としていたので、翌日の行だけ表示が変わった）
+      asserts.check("3セルとも期限はLOの年月",
+        [0, 1, 2].map((r) => cellText(c, r, col).includes(`要対応｜${fmt(LO_LATER)}まで`)), [true, true, true]);
+      asserts.checkTrue("翌日の行に期日の年月は出さない（LOのほうが後だから）",
+        !cellText(c, 2, col).includes(`要対応｜${fmt(TOMORROW)}まで`));
       asserts.check("3セルとも「期限超過」を使わない",
         [0, 1, 2].map((r) => cellText(c, r, col).includes("期限超過")), [false, false, false]);
       asserts.check("3セルとも同一性：同一でない のまま",

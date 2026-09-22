@@ -56,7 +56,8 @@ const STAMP = "2026-09-19 10:00";
 // 型式TP-3 … 前のランも比較元も無い（前段なし）。
 // 型式TP-4 … LOが空。新型車日でも「要」にならないため、対象判定の段階で対象外になる（B8）。
 // 型式TP-5・TP-6 … 同じPJ-Eで互いを比較元にし、両方「同一」＝連鎖が循環する。
-// 型式TP-7・TP-8 … 同じPJ-F。TP-7は同一性が「未確認・要再確認あり」で、要再確認と根拠未確認が同じセルに出る。
+// 型式TP-7・TP-8 … 同じPJ-F。TP-7は同一性が「同一・要再確認あり」で、要再確認と根拠未確認が同じセルに出る
+//                  （比較元TP-8は根になれる位置にないので、連鎖はそこで前段なしになる）。
 // 型式TP-9・TP-10 … 同じPJ-G。比較元（TP-10）のLOが空＝連鎖の途中でLOが読めない。
 // 型式TP-11・TP-12 … 同じPJ-H。TP-11は同じLOの前のランが2つあり(a)が一意に決まらない。
 //                    比較元（TP-12・同一）は根になれる位置にあるが、(b)へフォールバックしない確認に使う。
@@ -113,9 +114,17 @@ const SAMENESS = [
   { runKey: "r904", rid: "g901", value: "同一",       reason: "ダミー：装置は同じ", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r902" },
   { runKey: "r904", rid: "g906", value: "同一でない", reason: "ダミー：装置を変更", decidedAt: STAMP, needsRecheck: true,  baseRunKey: "r902" },
   { runKey: "r905", rid: "g901", value: "同一",       reason: "ダミー：(a)と(b)の両方がある節", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r903" },
+  // REG-T・REG-U でも「同一」と答えておく。F-19 C3 で、比較元があって同一性が未確認のセルは
+  // 新型車側で判定される（＝猶予を使っていない＝F-12の対象外）ようになったため、
+  // 「連鎖の途中で止まる」ことを見るには、セル自身は猶予を使っている（＝同一と答えた）必要がある。
+  { runKey: "r905", rid: "g905", value: "同一",       reason: "ダミー：連鎖の途中（TP-2 PJ-B）が未確認で止まる例", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r903" },
+  { runKey: "r905", rid: "g906", value: "同一",       reason: "ダミー：連鎖の途中（TP-2 PJ-B）が同一でないで止まる例", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r903" },
   { runKey: "r908", rid: "g901", value: "同一",       reason: "ダミー：循環その1", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r909" },
   { runKey: "r909", rid: "g901", value: "同一",       reason: "ダミー：循環その2", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r908" },
-  { runKey: "r910", rid: "g901", value: "未確認",     reason: "ダミー：確認し直す", decidedAt: "",    needsRecheck: true,  baseRunKey: "" },
+  // 要再確認と根拠未確認が同じセルに並ぶ例。F-19 C3 以降、未確認のセルは新型車側で判定されて
+  // F-12の対象外になるので、「同一」と答えたうえで要再確認が立っている状態にしてある
+  // （読み込んだデータとしては起こりうる形。比較元が変わったあと同一で答え直す前など）。
+  { runKey: "r910", rid: "g901", value: "同一",       reason: "ダミー：同一と答えたが要再確認が立っている", decidedAt: STAMP, needsRecheck: true,  baseRunKey: "r911" },
   { runKey: "r912", rid: "g901", value: "同一",       reason: "ダミー：比較元のLOが空", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r913" },
   { runKey: "r914", rid: "g901", value: "同一",       reason: "ダミー：(a)が曖昧でも(b)へ逃げない", decidedAt: STAMP, needsRecheck: false, baseRunKey: "r917" },
 ];
@@ -295,8 +304,13 @@ const SCENARIOS = [
       asserts.check("比較元・同一性が無くても(a)だけで根に届く", [noCtx.state, noCtx.hops, noCtx.root?.key], ["根到達", 1, "r901"]);
       // (b)：同一のときだけ辺になる
       asserts.check("同一と答えた比較元は辺になる（TP-2 PJ-B → TP-1 PJ-B → 根）", shape(basis("r904", "g901")), ["根到達", 1, "r901"]);
+      // 連鎖の途中（TP-2 PJ-B）の同一性が未確認／同一でない → そこで止まる。セル自身は「同一」で猶予を使っている。
       asserts.check("未確認の比較元は辺にしない（REG-T）", basis("r905", "g905").state, "根拠未確認");
       asserts.check("同一でないと答えた節はそこで止まる（REG-U）", basis("r905", "g906").state, "根拠未確認");
+      // F-19 C3：セル自身の同一性が未確認なら新型車側で判定される＝猶予を使っていない＝対象外
+      asserts.check("セル自身が未確認なら対象外（C3）",
+        [basisOf(runOf("r905"), regOf("g905"), RUNS, ctxOf({ ...DUMMY, sameness: [] })).state,
+         usesGrace(runOf("r905"), regOf("g905"), "未確認")], ["対象外", false]);
       // (a)優先：TP-2 PJ-C は(a)の前段（TP-2 PJ-B）と(b)の比較元（TP-1 PJ-C・同一）の両方を持つ
       asserts.check("(a)と(b)の両方がある節は(a)をたどる", basis("r905", "g901").path.map((r) => r.key), ["r905", "r904", "r902", "r901"]);
       asserts.check("(b)の比較元（TP-1 PJ-C）は通らない", basis("r905", "g901").path.some((r) => r.key === "r903"), false);

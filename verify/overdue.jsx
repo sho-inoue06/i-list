@@ -279,9 +279,16 @@ const SCENARIOS = [
       asserts.check("LO=翌日（未到来）", st(YESTERDAY, FAR, undefined, TOMORROW), "要対応");
       asserts.check("LO=当日（境界・到来済み）", st(YESTERDAY, FAR, undefined, TODAY_D), "法規不適合");
       asserts.check("LO=前日（到来済み）", st(YESTERDAY, FAR, undefined, YESTERDAY), "法規不適合");
-      asserts.check("LO未到来でも期日が先なら期日を示す", complianceStateOf({ dueDate: TOMORROW, drop: FAR, lo: LO_SOON }).label, L_UPCOMING(TOMORROW));
+      // F-19 C6：期限 = max（適用した規制日、LO）。期日が先でもLOがもっと先ならLOを示す
+      // （F-14では期日を示していた点が、F-19で変わった）
+      asserts.check("LO未到来で期日より後なら、期日が先でもLOを示す", complianceStateOf({ dueDate: TOMORROW, drop: FAR, lo: LO_SOON }).label, L_UPCOMING(LO_SOON));
+      asserts.check("LOのほうが先なら期日を示す", complianceStateOf({ dueDate: LO_SOON, drop: FAR, lo: TOMORROW }).label, L_UPCOMING(LO_SOON));
       asserts.check("LO未到来で期日が過去ならLOを示す", complianceStateOf({ dueDate: YESTERDAY, drop: FAR, lo: LO_SOON }).label, L_UPCOMING(LO_SOON));
-      asserts.check("LO未到来よりドロップ済みが優先", st(YESTERDAY, YESTERDAY, undefined, TOMORROW), "過去不適合");
+      // F-19：状態名も決定表の出力から作る（Codexレビュー指摘1の修正）。LO > drop は決定表が前提にする
+      // 並び（LO < drop）から外れたデータで、LOがまだ来ていない＝超過にならないので「要対応｜LOまで」になる。
+      // F-14では drop済みを優先して「過去不適合」にしていたが、それだと決定表の出力と画面が食い違う。
+      asserts.check("LO未到来はドロップ済みでも超過にしない", st(YESTERDAY, YESTERDAY, undefined, TOMORROW), "要対応");
+      asserts.check("LOが到来していればドロップ済みは過去不適合のまま", st(YESTERDAY, YESTERDAY, undefined, LONG_AGO), "過去不適合");
       asserts.check("LO未到来より人の対象外が優先", st(YESTERDAY, FAR, "対象外", TOMORROW), "対象外");
       asserts.check("LOが空なら到来済み側", st(YESTERDAY, FAR, undefined, ""), "法規不適合");
       asserts.check("LOが実在しない日付でも到来済み側", st(YESTERDAY, FAR, undefined, "2026-02-30"), "法規不適合");
@@ -329,13 +336,14 @@ const SCENARIOS = [
   {
     id: "A3-upcoming-orange",
     name: "期日がこれからのセルは、帳票セルとコンプラ漏れ一覧で橙の「要対応｜YYYY/MMまで」になる",
-    expect: "DEMO-A・DEMO-D・DEMO-E × REG-FUTURE が 要対応｜翌日の年月まで。法規不適合は併記しない",
+    expect: "DEMO-A・DEMO-D × REG-FUTURE が 要対応｜翌日の年月まで。LOが60日先のDEMO-EだけはLOの年月（C6の max）。法規不適合は併記しない",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, BASE_DUMMY);
-      asserts.check("3セルとも要対応（期日を示す）",
+      // F-19 C6：期限 = max（適用した規制日、LO）。DEMO-E はLOが60日先なので期日（翌日）ではなくLOを出す。
+      asserts.check("3セルとも要対応（期限は max（期日、LO））",
         [["r401", "g403"], ["r404", "g403"], ["r405", "g403"]].map(([k, g]) => statesIn(cellText(c, ROW[g], COL[k]))),
-        [[L_UPCOMING(TOMORROW)], [L_UPCOMING(TOMORROW)], [L_UPCOMING(TOMORROW)]]);
-      asserts.checkTrue("LOが先でも、期日が先ならLOではなく期日を示す", cellText(c, ROW.g403, COL.r405).includes(L_UPCOMING(TOMORROW)));
+        [[L_UPCOMING(TOMORROW)], [L_UPCOMING(TOMORROW)], [L_UPCOMING(LO_SOON)]]);
+      asserts.checkTrue("LOが期日より後なら、期日ではなくLOを示す", cellText(c, ROW.g403, COL.r405).includes(L_UPCOMING(LO_SOON)));
       const t = cardText(c, LEAKS);
       asserts.check("コンプラ漏れの要対応は5件（期日3・LO2）", (t.match(/要対応｜/g) || []).length, 5);
       asserts.checkTrue("DEMO-A×REG-FUTURE の行", t.includes(`DEMO-A（PJ-A） × REG-FUTURE継続 ${L_UPCOMING(TOMORROW)}`));
@@ -458,7 +466,8 @@ const SCENARIOS = [
       const cell = (k, g) => cellText(c, SROW[g], SCOL[k]);
       // 同一性の行があるセルは、帳票セルと同一性の行で同じ状態名が2回出る
       asserts.check("DEMO-W×前日", statesIn(cell("r412", "g411")), [L_VIOLATION, L_VIOLATION]);
-      asserts.check("DEMO-ZZ×翌日（期日がこれから）", statesIn(cell("r416", "g412")), [L_UPCOMING(TOMORROW), L_UPCOMING(TOMORROW)]);
+      // F-19 C6：DEMO-ZZ はLOが60日先なので、期日（翌日）ではなくLOが期限になる
+      asserts.check("DEMO-ZZ×翌日（期限は max＝LO）", statesIn(cell("r416", "g412")), [L_UPCOMING(LO_SOON), L_UPCOMING(LO_SOON)]);
       asserts.check("DEMO-X×前日（drop前日・期日＝前日）", statesIn(cell("r413", "g411")), [L_PAST, L_PAST]);
       asserts.check("DEMO-ZZ（LO未到来）×前日は法規不適合にしない", statesIn(cell("r416", "g411")), [L_UPCOMING(LO_SOON), L_UPCOMING(LO_SOON)]);
       asserts.check("同一性の行が出ていること", ["r412", "r413", "r416"].map((k) => cell(k, "g411").includes("同一性：同一でない")), [true, true, true]);
@@ -554,10 +563,11 @@ const SCENARIOS = [
         await sleep(160);
         const grid = (c) => [0, 1, 2].map((r) => [0, 1, 2, 3, 4].map((k) => statesIn(cellText(c, r, k)).join("")));
         const sa = grid(cs), aa = grid(ca);
+        // 最終列（DEMO-E）はLOが60日先なので、期日が翌日の行でも期限はLOになる（F-19 C6の max）
         asserts.check("単体版の状態（行＝法規、列＝型式ラン）", sa, [
           [L_VIOLATION, L_VIOLATION, L_PAST, "", L_UPCOMING(LO_SOON)],
           [L_VIOLATION, L_VIOLATION, "", "", L_UPCOMING(LO_SOON)],
-          [L_UPCOMING(TOMORROW), "", "", L_UPCOMING(TOMORROW), L_UPCOMING(TOMORROW)],
+          [L_UPCOMING(TOMORROW), "", "", L_UPCOMING(TOMORROW), L_UPCOMING(LO_SOON)],
         ]);
         asserts.check("API版も同じ", aa, sa);
         asserts.check("コンプラ漏れ一覧も同じ", statesIn(cardText(ca, LEAKS)), statesIn(cardText(cs, LEAKS)));
