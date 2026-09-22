@@ -47,6 +47,20 @@ export const TEXT = {
     生産中:   "生産中",
     "drop済み": "drop済み",
   },
+  // 危険な型式ランの一覧（F-10）。**危険かどうかの条件・しきい値はここに置かない**
+  // （並べる条件は decideCell の出力だけで決まる。ここは「その結果をどう呼ぶか」だけ）。
+  risk: {
+    見出し:   "危険な型式ラン",
+    件数:     (runs, cells) => `${runs} ラン・${cells} 件`,
+    該当なし:  "危険な型式ランはありません。",
+    内訳:     (bad, warn) => `不適合 ${bad} 件・予告 ${warn} 件`,
+    // 日数の主語は状態ごとに変える（A3）。「規制日まで何日超過」のような混ざった言い方はしない。
+    超過日数:  (n) => `期限を過ぎて ${n} 日`,
+    予告日数:  (n, afterDrop) => `継続車規制日まで ${n} 日（dropの ${afterDrop} 日後）`,
+    日数不明:  "日数不明（日付が読めません）",
+    // A9の印。判定は変えず、印を付けるだけ。
+    同一性未確認: "同一性 未確認",
+  },
 };
 // 「今日」（F-13）。画面を開いた／再読み込みした時点の端末ローカル日付を使う。
 // ・モジュール評価はページの読み込みごとに1回なので、TODAY＝そのページを開いた日になる。
@@ -1045,7 +1059,9 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
         (!!sameRec && (sameRec.needsRecheck || sameRec.value !== "未確認")));
       // 根拠（F-12）：継続車日を借りているセルだけ。判定・色・期日・要再確認には一切関与しない。
       const basis = basisCtx ? basisCtx.of(run, reg) : null;
-      const entry = { run, reg, auto, decision, notice, dec, compliance, base, sameRec, sameness, showSame, basis };
+      // 危険（F-10）：決定表の出力の2つだけを読む。危険でないセルは null。
+      const risk = riskOfCell(decision, today);
+      const entry = { run, reg, auto, decision, notice, dec, compliance, base, sameRec, sameness, showSame, basis, risk };
       m.set(reg, entry);
       list.push(entry);
     }
@@ -1062,6 +1078,99 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
     // 型式ランの列見出しに出す1語（C5）。セルの状態名とは混ぜない。
     phaseOf: (run) => phases.get(run) || null,
   };
+}
+
+// ───────────────────────────────────────────────
+// 危険な型式ランの一覧（F-10）
+//
+// ここは **判定をしない**。decideCell の出力のうち次の2つが「はい」のセルだけを危険とし（A1）、
+// 画面に出す日数を数えるだけである。要否・期限・生産フェーズ・実績の有無をここで見直さない。
+//
+//   現在法規不適合 = はい … 要かつ実績なしかつ超過かつ生産中
+//   黄色予告       = はい … 否かつ実績なしかつ 0 < 継続車規制日 − drop ≤ 30 かつ 継続車規制日 > 今日
+//
+// 出さないものと理由（2026-09-23の決定。別のゲートを足さない）：
+//   ・法規適合必要（超過前）… これから対応する正常な状態で、件数が多すぎて検出の意味がなくなる
+//   ・過去に法規不適合（drop済み）… いま手を打てない。状態自体はマトリクスに残る
+// この2条件から自動的に導かれること：
+//   ・開発中（今日 < LO）のランは構造上いちども超過にならない（期限 = max(規制日, LO)・F-19 C6）ので、
+//     現在法規不適合では出ない。黄色予告では出うる。
+//   ・drop済みのランの「要」のセルは 過去に法規不適合 になるので出ない。
+//     ただし **ドロップが30日以内の過去で、継続車規制日がこれから来る**セルは黄色予告の条件を満たすので出る
+//     （ドロップが延びれば引っかかる、という予告そのもの）。F-10ページの導出はここまで書き分けていないが、
+//     A1は「決定表の出力が はい のセルだけ・別のゲートを足さない」なので、そのまま出している。
+//   ・同一性切れは実効の適用区分を経て要否に反映済みなので、独立の条件にしない。
+//
+// ■ 日数（A3）。主語を状態ごとに変える（「規制日まで何日超過」のような混ざった言い方をしない）。
+//   現在法規不適合 … 期限を過ぎて n 日（n = 今日 − 期限日。期限日 = max(規制日, LO)。当日は0）
+//   黄色予告       … 継続車規制日まで n 日（n = 継続車規制日 − 今日）。dropの何日後かは決定表の窓の値
+//
+// ■ 並べ替えに使う「切迫度」（urgency）は、上の日数を1本の数直線へ載せ直したもの。
+//   超過は負、これからは正。小さいほど切迫している。**新しい判定ではなく日数の言い換え**である。
+//   期限日・継続車規制日が読めないときは null（＝最後に並べる。日数も出さない）。
+// ───────────────────────────────────────────────
+export const RISK_KINDS = ["不適合", "予告"];
+
+export function riskOfCell(decision, today = TODAY) {
+  const t = dateDayNumber(today);
+  if (decision?.現在法規不適合) {
+    const d = dateDayNumber(decision.期限日);
+    const days = d === null || t === null ? null : t - d;     // 期限を過ぎて n 日（当日＝0）
+    return { kind: "不適合", days, afterDrop: null, urgency: days === null ? null : -days };
+  }
+  const y = decision?.黄色予告;
+  if (y) {
+    const k = dateDayNumber(y.keiDate);
+    const days = k === null || t === null ? null : k - t;     // 継続車規制日まで n 日
+    return { kind: "予告", days, afterDrop: y.days, urgency: days };
+  }
+  return null;
+}
+
+// 切迫している順（A3）。小さい＝切迫。日数が読めない行は最後。
+// 同点のときは不適合を先にする（数の上では超過が必ず 0 以下・予告が 1 以上なので
+// 実際には日数が読めない行どうしでしか起きないが、規則として明示しておく）。
+const RISK_RANK = { 不適合: 0, 予告: 1 };
+const cmpUrgency = (a, b) => {
+  if (a.urgency === null && b.urgency === null) return RISK_RANK[a.kind] - RISK_RANK[b.kind];
+  if (a.urgency === null) return 1;
+  if (b.urgency === null) return -1;
+  if (a.urgency !== b.urgency) return a.urgency - b.urgency;
+  return RISK_RANK[a.kind] - RISK_RANK[b.kind];
+};
+
+// 型式ラン単位で束ねた一覧の行（A2）。1行＝1型式ラン、展開するとそのランの危険な法規が並ぶ。
+//
+//   model … buildCellModel の集約結果（帳票のセルと同じもの）
+//   runs  … 並べる対象の型式ラン（F-02の表示フィルターを通した visibleRuns。省略＝全ラン）。
+//           **型式ランのオブジェクトで絞る**（key は外部JSON経由で重複しうるため文字列では引かない）。
+//
+// 法規行の順序は model.list の順（runs の順 × regs の順）を保ったまま切迫度で並べ替える
+// （Array.prototype.sort は安定なので、同じ切迫度の行は元の法規順のまま残る）。
+export function riskRunRows(model, { runs = null } = {}) {
+  const allow = runs ? new Set(runs) : null;
+  const byRun = new Map();
+  for (const m of model.list) {
+    if (!m.risk) continue;
+    if (allow && !allow.has(m.run)) continue;
+    if (!byRun.has(m.run)) byRun.set(m.run, []);
+    byRun.get(m.run).push(m);
+  }
+  const rows = [];
+  for (const [run, cells] of byRun) {
+    cells.sort((a, b) => cmpUrgency(a.risk, b.risk));
+    const bad = cells.filter((m) => m.risk.kind === "不適合").length;
+    const head = cells[0].risk;   // 最も切迫した法規行（並べ替え済みなので先頭）
+    rows.push({
+      run, phase: model.phaseOf(run), cells,
+      bad, warn: cells.length - bad,
+      kind: head.kind, urgency: head.urgency, top: head,
+      // A9：同一性が未確認（比較元があるのに未回答）のセルを含むか。印だけで、並べる条件には効かない。
+      unconfirmed: cells.some((m) => m.decision.根拠未確認),
+    });
+  }
+  rows.sort(cmpUrgency);
+  return rows;
 }
 
 // 採番の上限。生成できる範囲と読み込める範囲を同じ値にそろえる。
@@ -1848,6 +1957,156 @@ function ColumnFilterBar({ projectOptions, typeOptions, selProjects, setSelProje
   );
 }
 
+// ===== 危険な型式ランの一覧（F-10）：マトリクス上部の開閉パネル =====
+//
+// **ここでは判定も日付比較もしない**（A5）。buildCellModel の集約結果を riskRunRows で
+// 束ねて並べたものを、そのまま描くだけである。文言はすべて TEXT（F-18の辞書）から引く。
+// 色も既存の系統をそのまま使う（赤＝法規不適合・橙＝黄色予告・青＝同一性）。
+//
+// 開閉・展開は一時的なUI状態で、保存形式にも dirty にも関与しない（既定は閉じた状態＝A6）。
+
+// 日数（A3）。主語は状態ごとに変える。読めない日付は日数を出さず、そう書く。
+function RiskDays({ risk, bold = true }) {
+  if (risk.days === null) return <span style={{ color:MUTE }}>{TEXT.risk.日数不明}</span>;
+  return risk.kind === "不適合"
+    ? <span style={{ color:RED, fontWeight: bold ? 800 : 600 }}>{TEXT.risk.超過日数(risk.days)}</span>
+    : <span style={{ color:AMBER, fontWeight: bold ? 800 : 600 }}>{TEXT.risk.予告日数(risk.days, risk.afterDrop)}</span>;
+}
+
+// 状態。帳票のセルと同じ状態名を出す（A7：マトリクスの状態と一覧の状態が一致する）。
+//   不適合の行 … F-14の4状態（人が対象外と判断していればその表示になる。判断は一覧に出すか否かには効かない）
+//   予告の行   … 帳票セルと同じ「否・要再確認」
+function RiskState({ m }) {
+  if (m.risk.kind === "予告")
+    return <span style={{ fontSize:11, fontWeight:700, color:AMBER }}>{TEXT.cell.否要再確認}</span>;
+  return m.compliance
+    ? <ComplianceLabel s={m.compliance} fontSize={11} />
+    : <span style={{ fontSize:11, fontWeight:800, color:RED }}>{TEXT.compliance.法規不適合()}</span>;
+}
+
+// A9の印。同一性が未確認（比較元があるのに未回答）のセルに付ける。
+// 判定は変えない（この印だけを理由に一覧へ出すこともしない）。同一性の「要再確認」とも別の見た目にする。
+export function SamenessUnknownMark({ title }) {
+  return (
+    <span title={title} style={{ display:"inline-block", fontSize:9, fontWeight:700, padding:"0 5px",
+      borderRadius:999, border:`1px dashed ${SAME}`, color:SAME, background:`${SAME}12`, lineHeight:1.7, marginLeft:5 }}>
+      {TEXT.risk.同一性未確認}
+    </span>
+  );
+}
+
+function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState([]);   // 展開中の型式ラン（オブジェクトで持つ。key は重複しうる）
+  const cellCount = rows.reduce((n, r) => n + r.cells.length, 0);
+  const isOpen = (run) => expanded.includes(run);
+  const toggle = (run) => setExpanded(isOpen(run) ? expanded.filter((x) => x !== run) : [...expanded, run]);
+  const allOpen = rows.length > 0 && rows.every((r) => isOpen(r.run));
+  const hasRisk = rows.length > 0;
+  const MARK_TITLE = "比較元を選んでいるのに同一性が未回答のセルを含みます。判定は安全側（新型車側）で出しています。";
+  return (
+    <div style={{ background:PANEL, border:`1px solid ${hasRisk ? `${RED}66` : LINE}`, borderRadius:10, padding:"9px 12px", marginBottom:10 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+        <button onClick={()=>setOpen(!open)}
+          style={{ display:"inline-flex", alignItems:"center", gap:6, background:"transparent", border:"none", padding:0,
+            color:"#eef4fa", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+          <span style={{ color:MUTE, fontSize:10 }}>{open ? "▼" : "▶"}</span>
+          <AlertTriangle size={12} color={hasRisk ? RED : MUTE}/>{TEXT.risk.見出し}
+        </button>
+        <span style={{ fontSize:10.5, fontWeight:800, color: hasRisk ? RED : GREEN }}>
+          {hasRisk ? TEXT.risk.件数(rows.length, cellCount) : TEXT.risk.該当なし}
+        </span>
+        {filterActive && <span style={{ fontSize:10, color:AMBER }}>表示フィルター適用中（{shownRuns}／{totalRuns}列）</span>}
+        <span style={{ flex:1 }} />
+        {!open && <span style={{ fontSize:10, color:MUTE }}>押すと一覧を開きます</span>}
+      </div>
+      {open && (
+        <div style={{ marginTop:8 }}>
+          {!hasRisk ? (
+            /* 件数の欄がすでに「該当なし」と言っているので、ここでは繰り返さず説明だけを残す */
+            <p style={{ color:MUTE, fontSize:11, margin:"6px 0" }}>
+              表示中の型式ランには、下の2条件に当たるセルがありません。
+            </p>
+          ) : (
+          <>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+            <button onClick={()=>setExpanded(allOpen ? [] : rows.map((r)=>r.run))} style={{ ...miniBtn, marginTop:0 }}>
+              {allOpen ? "すべてたたむ" : "すべて展開"}
+            </button>
+            <span style={{ fontSize:10, color:MUTE }}>切迫している順（超過が上）に並べています</span>
+          </div>
+          <div style={{ overflowX:"auto" }}>
+            <table style={tbl}>
+              <thead><tr>
+                <th style={th}>法規</th><th style={th}>状態</th><th style={th}>適用した規制</th>
+                <th style={th}>規制日</th><th style={th}>期限</th><th style={th}>日数</th>
+              </tr></thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <React.Fragment key={`run:${i}`}>
+                    {/* ラン行（A2）。人は「どの車が危ないか」を先に見るので、法規より先に型式ランを出す。 */}
+                    <tr>
+                      <td colSpan={6} style={{ ...td, background:"rgba(90,107,125,0.10)", padding:"7px 8px" }}>
+                        <button onClick={()=>toggle(r.run)}
+                          style={{ display:"inline-flex", alignItems:"center", gap:6, background:"transparent", border:"none",
+                            padding:0, color:"#eef4fa", fontSize:11.5, cursor:"pointer", fontFamily:"inherit", textAlign:"left" }}>
+                          <span style={{ color:MUTE, fontSize:9 }}>{isOpen(r.run) ? "▼" : "▶"}</span>
+                          <span style={{ fontSize:10.5, color:"#8fa3b8" }}>{r.run.gen || "（コード未設定）"}</span>
+                          <span style={{ fontFamily:"ui-monospace,monospace", fontWeight:700 }}>{r.run.typeId || "（型式未設定）"}</span>
+                          <span style={{ fontSize:9.5, padding:"1px 6px", borderRadius:999, color:"#8fa3b8",
+                            border:`1px solid ${LINE}`, background:"rgba(90,107,125,0.12)", fontWeight:700 }}>
+                            {TEXT.phase[r.phase] || ""}</span>
+                          <span style={{ fontSize:9.5, color:MUTE, fontFamily:"ui-monospace,monospace" }}>
+                            LO {fmt(r.run.lo)}・drop {fmt(r.run.drop)}</span>
+                        </button>
+                        <span style={{ marginLeft:10, fontSize:10.5, color:"#aab8c6" }}>{TEXT.risk.内訳(r.bad, r.warn)}</span>
+                        <span style={{ marginLeft:10, fontSize:10.5 }}><RiskDays risk={r.top} /></span>
+                        {r.unconfirmed && <SamenessUnknownMark title={MARK_TITLE} />}
+                      </td>
+                    </tr>
+                    {/* 法規行（展開したときだけ）。並びはそのランの中で切迫している順。 */}
+                    {isOpen(r.run) && r.cells.map((m, j) => (
+                      <tr key={`cell:${i}:${j}`}>
+                        <td style={{ ...td, fontSize:11.5, color:"#eef4fa", paddingLeft:26 }}>
+                          {m.reg.id}<div style={{ fontSize:9, color:MUTE }}>{m.reg.label}</div>
+                        </td>
+                        <td style={td}>
+                          <RiskState m={m} />
+                          {m.decision.根拠未確認 && <SamenessUnknownMark title={MARK_TITLE} />}
+                        </td>
+                        <td style={{ ...td, fontSize:10.5, color:"#aab8c6", whiteSpace:"nowrap" }}>
+                          {m.decision.適用した規制 === "なし" ? <span style={{ color:MUTE }}>—</span> : <Badge kind={m.decision.適用した規制}/>}
+                        </td>
+                        <td style={{ ...td, fontSize:10.5, color:"#aab8c6", fontFamily:"ui-monospace,monospace", whiteSpace:"nowrap" }}>{fmt(m.decision.規制日)}</td>
+                        <td style={{ ...td, fontSize:10.5, color:"#aab8c6", fontFamily:"ui-monospace,monospace", whiteSpace:"nowrap" }}>
+                          {m.decision.期限 === "なし" ? "—" : `${m.decision.期限} ${fmt(m.decision.期限日)}`}
+                        </td>
+                        <td style={{ ...td, fontSize:10.5, whiteSpace:"nowrap" }}><RiskDays risk={m.risk} bold={false} /></td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          </>)}
+          <div style={{ marginTop:8, fontSize:10, color:MUTE, lineHeight:1.7 }}>
+            並ぶのは <b style={{ color:RED }}>法規不適合（いま生産中・期限を過ぎている・実績なし）</b> と
+            <b style={{ color:AMBER }}>否・要再確認（ドロップ後30日以内にこれから継続規制が来る）</b> の
+            2つだけです。<b>これから対応する「要対応」と、drop済みの「過去に法規不適合」は出しません</b>
+            （前者は件数が多すぎて検出の意味がなくなり、後者はいま手を打てないため）。
+            まだラインオフしていないランは期限がLOになるため、法規不適合では出ません。
+            ドロップ済みのランでも、<b>ドロップ直後にこれから継続規制が来る</b>場合は予告として出ます（ドロップが延びれば引っかかるため）。
+            状態・規制日・期限は<b>帳票のセルとまったく同じ判定結果</b>で、ここでは束ねて並べているだけです。
+            <span style={{ display:"inline-flex", verticalAlign:"middle" }}><SamenessUnknownMark title={MARK_TITLE} /></span>
+            は、比較元があるのに同一性が未回答のセルを含む印です（判定は安全側の新型車側で出しています。印があること自体は一覧に出す理由にしません）。
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // sameCtx / onSaveSameness は省略可能（F-04・単体版のみ）。省略時は同一性のUIを一切描画しない。
 export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, onSaveDecision, onRecheckRun, dataGen, columnFilter, sameCtx, onSaveSameness, basisCtx }) {
   // セルの色と中身は、決定表（F-19）の出力「表示」1語だけで決まる（C4）。
@@ -1908,6 +2167,10 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
   const visibleRuns = !filterActive ? runs : runs.filter((run) =>
     (selProjects.length === 0 || selProjects.includes(run.gen)) &&
     (selTypes.length === 0 || selTypes.includes(run.typeId)));
+  // 危険な型式ランの一覧（F-10）。帳票と同じ集約結果を、表示中の列だけに絞って束ねる（A4）。
+  // 絞れば作業中用、外せば全体の見回しになる。判定・日付比較はここでも一覧側でも行わない。
+  // ※ 新しいフックは既存フックより後ろに置く（既存の呼び出し順を動かさないため）。
+  const riskRows = useMemo(() => riskRunRows(model, { runs: visibleRuns }), [model, visibleRuns]);
 
   if (runs.length===0 || regs.length===0) {
     // データが空でも、保持している列フィルターの選択は見せて手動解除できるようにする
@@ -1940,6 +2203,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
           total={runs.length} shown={visibleRuns.length}
           active={filterActive} onClearAll={columnFilter.clear} />
       )}
+      <RiskPanel rows={riskRows} filterActive={filterActive} shownRuns={visibleRuns.length} totalRuns={runs.length} />
       {filterActive && visibleRuns.length === 0 ? (
         <div style={{ background:PANEL, border:`1px dashed ${LINE}`, borderRadius:12, padding:"22px 16px", textAlign:"center", color:MUTE, fontSize:12, lineHeight:1.8 }}>
           絞り込み条件に一致する型式ランがありません（<b style={{ color:AMBER }}>0 件</b>）。<br/>
