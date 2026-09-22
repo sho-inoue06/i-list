@@ -441,15 +441,19 @@ const SCENARIOS = [
   },
   {
     id: "B9-regression",
-    name: "回帰例：REG-A（新型車日2016/01・継続車日2018/01）の000B・000Cには何も出さない",
+    name: "回帰例：新型車日・継続車日がともにLOより前の法規（REG-A）の000B・000Cには何も出さない",
     expect: "どちらの日でも「要」のセルには根拠文も根拠未確認も出ない。猶予を使うセルでは連鎖検証が動く",
     async run({ mount, asserts }) {
       // 製品のSEEDそのもので確認する（停止①の現物確認で見つかった誤りの回帰）
+      // F-20でSEEDの日付が「今日からの相対日付」になったため、日付の値そのものではなく
+      // **この回帰が成り立つ前提**（REG-Aの両方の日が000B・000CのLOより前）を確認する。
       const reg = (id) => SEED_DATA.regs.find((r) => r.id === id);
       const run = (key) => SEED_DATA.runs.find((r) => r.key === key);
       const A = reg("DEMO-REG-A"), B = reg("DEMO-REG-B");
-      asserts.check("REG-Aの日付", [A.shin, A.kei], ["2016-01-01", "2018-01-01"]);
-      asserts.check("000B・000CのLO", [run("r2").lo, run("r4").lo], ["2020-01-01", "2023-01-01"]);
+      asserts.check("REG-Aは新型車日・継続車日とも000B・000CのLOより前",
+        [A.shin < run("r2").lo && A.kei < run("r2").lo, A.shin < run("r4").lo && A.kei < run("r4").lo], [true, true]);
+      asserts.check("REG-Bの新型車日は000BのDEMO-0002のLO以前、継続車日はそのdropより後",
+        [B.shin <= run("r3").lo, B.kei > run("r3").drop], [true, true]);
       asserts.check("どちらの日でも要（要否が変わらない）",
         [graceChangesNeed(run("r2"), A), graceChangesNeed(run("r4"), A)], [false, false]);
       asserts.check("よって対象外", [basisIn(SEED_DATA, "r2", A.rid).state, basisIn(SEED_DATA, "r4", A.rid).state], ["対象外", "対象外"]);
@@ -460,8 +464,10 @@ const SCENARIOS = [
       const c = await mountWith(mount, SEED_DATA);
       asserts.check("REG-Aの000Bセルに根拠は出ない", cellText(c, SEED_DATA, "r2", A.rid).includes("根拠"), false);
       asserts.check("REG-Aの000Cセルに根拠は出ない", cellText(c, SEED_DATA, "r4", A.rid).includes("根拠"), false);
+      // 根拠文のLOはSEEDの値から作る（固定日付を書かない。F-20でSEEDが相対日付になったため）
+      const ym = (d) => d.replaceAll("-", "/").slice(0, 7);
       asserts.checkTrue("猶予を使うセルには根拠文が出る",
-        cellText(c, SEED_DATA, "r3", B.rid).includes("根拠：DEMO-0001（000B・LO 2020/01）の指定から変更なしで継続（中継0件）"));
+        cellText(c, SEED_DATA, "r3", B.rid).includes(`根拠：DEMO-0001（000B・LO ${ym(run("r2").lo)}）の指定から変更なしで継続（中継0件）`));
       const shown = [...c.querySelectorAll("table tbody td")].filter((td) => td.textContent.includes("根拠")).length;
       asserts.check("SEEDで根拠の行が出るセル数", shown, 1);
     },
