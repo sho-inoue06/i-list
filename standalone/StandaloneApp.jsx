@@ -19,7 +19,7 @@ import {
   pruneDecisionsByRun, pruneDecisionsByReg,
   setBase, sweepSameness, upsertSameness, normalizeSameness, makeSamenessContext, makeBasisContext,
   pruneBasesByRun, pruneSamenessByRun, pruneSamenessByReg,
-  SCHEMA_VERSION, pruneCertByRun, pruneCertByReg,
+  SCHEMA_VERSION, pruneCertByRun, pruneCertByReg, seedCertForNewRun,
   INK, PALETTE, btn,
 } from "../src/IListApp.jsx";
 
@@ -148,6 +148,7 @@ export default function StandaloneApp({ bootData } = {}) {
   // 行削除と同じ操作で、その行を参照する判断だけを取り除く（孤立参照を作らない）。
   // 認証実績も型式ラン × 法規行で持つので、同じ操作で取り除く（F-22 A7）。
   const handleDeleteRun = (runKey) => {
+    newRunKeys.current.delete(runKey);
     setCert((c) => pruneCertByRun(c, runKey));
     setDecisions((ds) => pruneDecisionsByRun(ds, runKey));
     setBases((bs) => pruneBasesByRun(bs, runKey));
@@ -157,6 +158,19 @@ export default function StandaloneApp({ bootData } = {}) {
     setCert((c) => pruneCertByReg(c, rid));
     setDecisions((ds) => pruneDecisionsByReg(ds, rid));
     setSameness((ss) => pruneSamenessByReg(ss, rid));
+  };
+  // この画面で「ランを追加」した型式ランのキー（F-22 A9）。型式を確定した時（型式欄から離れた時）に1回だけ、
+  // 同じ型式の既存ランのうちLOが最も新しいランから認証実績を写し、写したら外す。以後は各ランが独立して編集される。
+  // 一時的なUI状態で、保存形式には入れない（読み込みで別データに替わったら空にする）。
+  const newRunKeys = useRef(new Set());
+  const handleAddRun = (key) => { newRunKeys.current.add(key); };
+  const handleRunTypeCommitted = (runKey, runsNow) => {
+    if (!newRunKeys.current.has(runKey)) return;
+    const run = runsNow.find((r) => r.key === runKey);
+    if (!run || run.typeId === "") return;         // 型式がまだ空なら、確定するまで待つ
+    newRunKeys.current.delete(runKey);             // 1回だけ（同じ型式が無くても、ここで終わり＝空で始まる）
+    const next = seedCertForNewRun(cert, runsNow, runKey);
+    if (next !== cert) setCert(next);
   };
   // 比較元の選択・変更・解除（型式ランタブ）と、同一性1件の保存（帳票セル）。
   const handleSetBase = (runKey, baseRunKey) => setBases((bs) => setBase(bs, runKey, baseRunKey));
@@ -275,6 +289,7 @@ export default function StandaloneApp({ bootData } = {}) {
         bases: nextBases, sameness: nextSameness } = parsed.data;
       const sweptDecisions = sweepRecheck(nextDecisions, nextRuns, nextRegs);
       const sweptSameness = sweepSameness(nextSameness, nextRuns, nextRegs, nextBases);
+      newRunKeys.current.clear();
       _setRuns(nextRuns); _setRegs(nextRegs); _setCert(nextCert);
       _setDecisions(sweptDecisions);
       _setBases(nextBases); _setSameness(sweptSameness);
@@ -357,7 +372,8 @@ export default function StandaloneApp({ bootData } = {}) {
           columnFilter={{ selProjects, setSelProjects, selTypes, setSelTypes, clear: clearColumnFilter }}
           onSaveDecision={handleSaveDecision} onRecheckRun={handleRecheckRun}
           sameCtx={sameCtx} onSaveSameness={handleSaveSameness} basisCtx={basisCtx} />}
-        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey,bases}} onDeleteRun={handleDeleteRun} onSetBase={handleSetBase} />}
+        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey,bases}} onDeleteRun={handleDeleteRun} onSetBase={handleSetBase}
+          onAddRun={handleAddRun} onRunTypeCommitted={handleRunTypeCommitted} />}
         {tab==="法規DB" && <RegsEditor {...{regs,setRegs}} onDeleteReg={handleDeleteReg} />}
         {tab==="認可書実績" && <CertEditor {...{runs,regs,cert,setCert,colorOf}} />}
       </div>
