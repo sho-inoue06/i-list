@@ -100,6 +100,16 @@ const SEED_OFFSETS = {
 };
 const EXPECTED_PHASES = ["drop済み", "drop済み", "drop済み", "drop済み", "drop済み", "生産中", "開発中"];
 
+// 写しの認証実績を「型式 × 法規ID」の単位でまとめて書き換える（対照実験用）。
+// F-22 で認証実績は型式ラン×法規行になったので、その型式の全ランの該当法規行へ同じ変更をかける
+// （F-22 より前の「型式×法規の値を1つ変える」と同じ効き方にするため）。ck=null は削除。
+function setTypeCk(data, typeId, regId, ck) {
+  const keys = data.runs.filter((r) => r.typeId === typeId).map((r) => r.key);
+  const rids = data.regs.filter((r) => r.id === regId).map((r) => r.rid);
+  data.cert = data.cert.filter((c) => !(keys.includes(c.runKey) && rids.includes(c.rid)));
+  if (ck !== null) for (const k of keys) for (const g of rids) data.cert.push({ runKey: k, rid: g, ck, planned: false });
+}
+
 // データ1つから「状態 → セル」の対応表を作る。画面を通さず、製品と同じ入口（buildCellModel）で求める。
 function stateMapOf(data, today = TODAY) {
   const { runs, regs, cert, bases, sameness } = data;
@@ -413,17 +423,26 @@ const SCENARIOS = [
   },
   {
     id: "A5-cert-shared",
-    name: "同じ型式×法規に認可番号があれば、プロジェクトが違っても実績ありになる",
-    expect: "DEMO-0001×REG-A は 000A・000B・000C の3ランとも実績あり。認証実績は型式×法規のままで、プロジェクト別の欄は足していない",
+    name: "同じ型式の全ランに同じ認可番号を入れてあり、プロジェクトが違っても実績ありになる",
+    expect: "DEMO-0001×REG-A は 000A・000B・000C の3ランとも実績あり。認証実績は型式ラン×法規行で持ち（F-22）、ダミーでは同じ型式の全ランに同じ番号を入れてある",
     async run({ asserts }) {
       const { model, runs, regs } = stateMapOf(SEED);
       const A = regs.find((r) => r.id === "DEMO-REG-A");
       const cells = runs.filter((r) => r.typeId === "DEMO-0001").map((r) => [r.gen, model.get(r, A).decision.表示]);
       asserts.check("DEMO-0001×REG-A の3プロジェクト", cells, [["000A", "実績あり"], ["000B", "実績あり"], ["000C", "実績あり"]]);
-      asserts.check("認可番号は型式ごとに1つ（プロジェクト別の欄は無い）",
-        Object.keys(SEED.cert).sort(), ["DEMO-0001", "DEMO-0002", "DEMO-0003", "DEMO-0004"]);
-      asserts.check("cert の値は「法規ID → 番号」だけ",
-        [...new Set(Object.values(SEED.cert).flatMap((m) => Object.values(m).map((v) => typeof v)))], ["string"]);
+      // F-22：認証実績は型式ラン×法規行のレコード。ダミーでは同じ型式の全ランが同じ番号を持つ。
+      const onA = SEED.cert.filter((c) => c.rid === A.rid && runs.find((r) => r.key === c.runKey)?.typeId === "DEMO-0001");
+      asserts.check("DEMO-0001×REG-A はランごとに1件ずつ・同じ番号", onA.map((c) => [c.runKey, c.ck]),
+        [["r1", "DEMO*A00/00*01"], ["r2", "DEMO*A00/00*01"], ["r4", "DEMO*A00/00*01"]]);
+      asserts.checkTrue("同じ型式のランは全部同じ番号の組を持つ（ダミーの作り方）",
+        ["DEMO-0001", "DEMO-0002", "DEMO-0003", "DEMO-0004"].every((t) => {
+          const sig = (k) => JSON.stringify(SEED.cert.filter((c) => c.runKey === k).map((c) => [c.rid, c.ck]));
+          const ks = runs.filter((r) => r.typeId === t).map((r) => r.key);
+          return ks.every((k) => sig(k) === sig(ks[0]));
+        }));
+      asserts.check("cert の各件は { runKey, rid, ck, planned } だけ",
+        [...new Set(SEED.cert.map((c) => Object.keys(c).sort().join(",")))], ["ck,planned,rid,runKey"]);
+      asserts.check("取得予定は全件なし（F-22 B3）", SEED.cert.some((c) => c.planned !== false), false);
       asserts.check("引き継ぎ確認中は製品データでは起きない",
         model.list.some((m) => m.decision.表示 === "引き継ぎ確認中"), false);
     },
@@ -456,7 +475,7 @@ const SCENARIOS = [
     async run({ asserts }) {
       // 1. 不適合を消す（DEMO-0003にREG-Cの認可番号を足す）
       const d1 = clone(SEED);
-      d1.cert["DEMO-0003"]["DEMO-REG-C"] = "DEMO*C00/00*99";
+      setTypeCk(d1, "DEMO-0003", "DEMO-REG-C", "DEMO*C00/00*99");
       asserts.checkTrue("不適合が消えると差分が出る", diffStateMap(stateMapOf(d1).map).length > 0);
       // 2. 予告を消す（REG-Eの継続車規制日をdropから31日後へ動かす＝窓の外）
       const d2 = clone(SEED);
@@ -464,7 +483,7 @@ const SCENARIOS = [
       asserts.checkTrue("予告が消えると差分が出る", diffStateMap(stateMapOf(d2).map).length > 0);
       // 3. 危険セルが増える（DEMO-0001のREG-Dの認可番号を消す＝000Cが生産中でないので過去不適合が増える）
       const d3 = clone(SEED);
-      delete d3.cert["DEMO-0003"]["DEMO-REG-D"];
+      setTypeCk(d3, "DEMO-0003", "DEMO-REG-D", null);
       const diff3 = diffStateMap(stateMapOf(d3).map);
       asserts.checkTrue("意図しない不適合が増えると差分が出る", diff3.some((x) => x.includes("現在法規不適合に余分")));
       // 4. **drop済みのランが危険一覧へ戻る**（000Cのドロップを REG-C の継続車規制日の30日窓へ動かす）。
@@ -479,12 +498,12 @@ const SCENARIOS = [
         riskRunRows(s4.model, { runs: s4.runs }).some((r) => r.phase === "drop済み"));
       // 5. 過去に法規不適合を消す（DEMO-0002にREG-Bの認可番号を足す＝実績ありに変わる）
       const d5 = clone(SEED);
-      d5.cert["DEMO-0002"]["DEMO-REG-B"] = "DEMO*B00/00*99";
+      setTypeCk(d5, "DEMO-0002", "DEMO-REG-B", "DEMO*B00/00*99");
       asserts.checkTrue("過去に法規不適合が消えると差分が出る",
         diffStateMap(stateMapOf(d5).map).some((x) => x.includes("過去に法規不適合に無い")));
       // 6. 実績ありの共有（A5）を崩す
       const d6 = clone(SEED);
-      delete d6.cert["DEMO-0001"]["DEMO-REG-A"];
+      setTypeCk(d6, "DEMO-0001", "DEMO-REG-A", null);
       asserts.checkTrue("実績ありが減ると差分が出る", diffStateMap(stateMapOf(d6).map).some((x) => x.includes("実績ありに無い")));
       // 7. 変えていない写しは差分なし（対照実験そのものが常にFAILしていないことの確認）
       asserts.check("写したままなら差分なし", diffStateMap(stateMapOf(clone(SEED)).map), []);
@@ -499,7 +518,7 @@ const SCENARIOS = [
       asserts.check("プロジェクトコード", [...new Set(SEED.runs.map((r) => r.gen))].sort(), ["000A", "000B", "000C", "001A"]);
       asserts.checkTrue("法規IDはすべて DEMO-REG- で始まる", SEED.regs.every((r) => /^DEMO-REG-[A-Z0-9]+$/.test(r.id)));
       asserts.checkTrue("法規名はすべて『ダミー法規』", SEED.regs.every((r) => r.label.startsWith("ダミー法規")));
-      const cks = Object.values(SEED.cert).flatMap((m) => Object.values(m));
+      const cks = SEED.cert.map((c) => c.ck);
       asserts.checkTrue("認可番号はすべて DEMO* 形式", cks.every((v) => /^DEMO\*[A-Z0-9]+\/\d+\*\d+$/.test(v)));
       asserts.checkTrue("同一性の理由はすべて『ダミー：』", SEED.sameness.every((s) => s.reason.startsWith("ダミー：")));
       asserts.check("メールアドレス・電話番号らしき文字列", /[\w.]+@[\w.]+|\d{2,4}-\d{2,4}-\d{4}/.test(JSON.stringify(SEED)), false);

@@ -15,7 +15,7 @@
 import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import StandaloneApp from "../standalone/StandaloneApp.jsx";
-import { parseImportedData, MAX_KEY_NUMBER, peekIds, planRegKeys, resetIds } from "../src/IListApp.jsx";
+import { parseImportedData, MAX_KEY_NUMBER, peekIds, planRegKeys, resetIds, migrateLegacyCert } from "../src/IListApp.jsx";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -324,7 +324,10 @@ const SCENARIOS = [
         const back = JSON.parse(text);
         // 読込時に法規行の内部キー(rid)を補うため、書き出しには rid が付く。
         // 値の削除・改名がないことを確認したうえで、rid を除いた内容が一致することを見る。
-        asserts.check("往復でrunsとcertが一致", { runs: back.runs, cert: back.cert }, { runs: VALID.runs, cert: VALID.cert });
+        // F-22：旧形式（版なし）の cert は読込時に型式ラン × 法規行へ移り、書き出しは版2になる。
+        // 期待値は同じ規則（補われた rid を使う）で作る。
+        asserts.check("往復でrunsとcertが一致（cert は版2へ移行）", { v: back.schemaVersion, runs: back.runs, cert: back.cert },
+          { v: 2, runs: VALID.runs, cert: migrateLegacyCert(VALID.cert, VALID.runs, back.regs) });
         asserts.check("往復でregsの元の値が一致",
           back.regs.map(({ rid, ...rest }) => rest), VALID.regs);
         asserts.checkTrue("補われたridが行ごとに付いている",
@@ -829,7 +832,7 @@ const SCENARIOS = [
         // 行数やラベルだけでなく、3データ全体が「新しい方」のままであることを確認する
         const afterStale = await snapshotAll(app.container);
         asserts.check("古い結果の破棄後も runs/cert が新しい方のまま",
-          { runs: afterStale.runs, cert: afterStale.cert }, { runs: [], cert: {} });
+          { runs: afterStale.runs, cert: afterStale.cert }, { runs: [], cert: [] });   // F-22：空の旧形式 cert は空配列へ移る
         asserts.check("regsは新しい方の1行のみ",
           afterStale.regs.map((r) => r.label), ["新"]);
       } finally {

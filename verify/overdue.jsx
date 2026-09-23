@@ -20,6 +20,7 @@ import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
   TODAY, parseImportedData, evalCellWith, summarize, approachingNoticeFor,
   complianceStateOf, condOf, COMPLIANCE_STATES, samenessAffects,
+  migrateLegacyCert,
 } from "../src/IListApp.jsx";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -162,6 +163,9 @@ const PAST_DUMMY = {
 };
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
+// ダミーの認証実績は旧形式（型式 × 法規ID）で書いてある（API版のモック応答で移行の経路も通すため）。
+// 純関数へ直接渡すときは、読み込み時と同じ規則（F-22 A5）で型式ラン × 法規行へ移してから渡す。
+const certOf = (d) => migrateLegacyCert(d.cert, d.runs, d.regs);
 
 // ── 画面ユーティリティ ──
 function cellAt(c, row, col) {
@@ -402,7 +406,7 @@ const SCENARIOS = [
       asserts.check("どちらも申請発生のまま（A9）",
         [0, 1].map((k) => cellText(c, 0, k).includes("申請発生")), [true, true]);
       const t = cardText(c, LEAKS);
-      asserts.check("一覧は2件とも残る", summarize(PAST_DUMMY.runs, PAST_DUMMY.regs, PAST_DUMMY.cert).leaks.length, 2);
+      asserts.check("一覧は2件とも残る", summarize(PAST_DUMMY.runs, PAST_DUMMY.regs, certOf(PAST_DUMMY)).leaks.length, 2);
       asserts.checkTrue("DEMO-P は drop済み（対応対象外）", /DEMO-P（PJ-P）\s*×\s*REG-OLD新型\s*drop済み（対応対象外）/.test(t));
       asserts.checkTrue("DEMO-Q は過去に法規不適合", /DEMO-Q（PJ-Q）\s*×\s*REG-OLD継続\s*過去に法規不適合（drop済み）/.test(t));
       asserts.check("どちらも灰色（赤い警告には含めない）",
@@ -434,7 +438,7 @@ const SCENARIOS = [
     async run({ mount, asserts }) {
       const cBase = await mountWith(mount, BASE_DUMMY);
       const tBase = cardText(cBase, LEAKS);
-      asserts.check("判断なしの一覧は10件", summarize(BASE_DUMMY.runs, BASE_DUMMY.regs, BASE_DUMMY.cert).leaks.length, 10);
+      asserts.check("判断なしの一覧は10件", summarize(BASE_DUMMY.runs, BASE_DUMMY.regs, certOf(BASE_DUMMY)).leaks.length, 10);
       asserts.check("判断なしの件数（法規不適合4・要対応5・過去不適合1）",
         [/(?<!過去に)法規不適合/g, /要対応｜/g, /過去に法規不適合（drop済み）/g].map((re) => (tBase.match(re) || []).length),
         [4, 5, 1]);
@@ -446,7 +450,7 @@ const SCENARIOS = [
       const cJudge = await mountWith(mount, JUDGE_DUMMY);
       const tJudge = cardText(cJudge, LEAKS);
       asserts.check("判断ありでも件数は同じ（除外しない）",
-        summarize(JUDGE_DUMMY.runs, JUDGE_DUMMY.regs, JUDGE_DUMMY.cert).leaks.length, 10);
+        summarize(JUDGE_DUMMY.runs, JUDGE_DUMMY.regs, certOf(JUDGE_DUMMY)).leaks.length, 10);
       // 10件の内訳：対象外3（r401×PAST・r401×FUTURE・r403×PAST）／法規不適合3／要対応4／drop済み0
       asserts.check("対象外3件・法規不適合3件・要対応4件・過去不適合0件",
         [/対象外（判断済み）/g, /(?<!過去に)法規不適合/g, /要対応｜/g, /過去に法規不適合（drop済み）/g].map((re) => (tJudge.match(re) || []).length),
@@ -513,7 +517,7 @@ const SCENARIOS = [
     expect: "実効日は summarize のとおりで、前日・当日は「既発効」、翌日は YYYY/MM。4状態の文言は一覧に出ない",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, BASE_DUMMY);
-      asserts.check("実効日（純関数）", summarize(BASE_DUMMY.runs, BASE_DUMMY.regs, BASE_DUMMY.cert).effDrop,
+      asserts.check("実効日（純関数）", summarize(BASE_DUMMY.runs, BASE_DUMMY.regs, certOf(BASE_DUMMY)).effDrop,
         { r401: YESTERDAY, r402: YESTERDAY, r403: YESTERDAY, r404: TOMORROW, r405: YESTERDAY });
       const t = cardText(c, EFFDROP);
       asserts.check("既発効は4件", (t.match(/既発効/g) || []).length, 4);
@@ -542,7 +546,7 @@ const SCENARIOS = [
       // 保存データ：キーも判断の値も変わらない。対象外の表示で要再確認は立たない
       const c = await mountWith(mount, JUDGE_DUMMY);
       const snap = await snapshotAll(c);
-      asserts.check("保存データのキー", Object.keys(snap).sort(), ["bases", "cert", "decisions", "regs", "runs", "sameness"]);
+      asserts.check("保存データのキー", Object.keys(snap).sort(), ["bases", "cert", "decisions", "regs", "runs", "sameness", "schemaVersion"]);
       asserts.check("判断は読み込んだままの値", snap.decisions, JUDGE_DUMMY.decisions);
       asserts.check("要再確認は増えない", snap.decisions.filter((d) => d.needsRecheck).length, 0);
       asserts.checkTrue("画面にも要再確認は出ない", !cellText(c, ROW.g401, COL.r401).includes("要再確認"));

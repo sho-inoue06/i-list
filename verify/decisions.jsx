@@ -28,6 +28,7 @@ import IListApp, {
   parentLinkOf, condOf, condEquals, sweepRecheck, normalizeDecisions,
   markRunNeedsRecheck, pruneDecisionsByRun, pruneDecisionsByReg, upsertDecision,
   DECISION_STATES, peekIds, resetIds,
+  migrateLegacyCert,
 } from "../src/IListApp.jsx";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -351,7 +352,9 @@ const SCENARIOS = [
         cond: kind === "null" ? null : kind === "mismatch" ? { ...matched, lo: "2001-01-01" } : matched };
       const input = { ...clone(DUMMY), decisions: [decision] };
       const changed = kind !== "matched";
-      const expected = { ...clone(input), decisions: [{ ...decision, needsRecheck: changed }] };
+      // F-22：旧形式（版なし）の cert は読み込み時に型式ラン × 法規行へ移る。期待値も同じ規則で作る。
+      const expected = { ...clone(input), cert: migrateLegacyCert(input.cert, input.runs, input.regs),
+        decisions: [{ ...decision, needsRecheck: changed }] };
       asserts.check("観測の初期値", readStandaloneState(c).dirtyRef, false);
       selectFile(c, JSON.stringify(input));
       await sleep(140);
@@ -404,7 +407,7 @@ const SCENARIOS = [
       }
       // 保護の観測が全て終わってから初めて書き出す。
       // 書き出しには F-04 の比較元・同一性（このケースでは空）も常に入る
-      asserts.check("JSON全項目の値が一致", await snapshotAll(c), { ...expected, bases: [], sameness: [] });
+      asserts.check("JSON全項目の値が一致", await snapshotAll(c), { schemaVersion: 2, ...expected, bases: [], sameness: [] });   // F-22：書き出しは版2
       await sleep(250);
       asserts.check("保存直後にdirtyへ戻らない", readStandaloneState(c).dirtyRef, false);
       asserts.check("保存後の表示", readStatus(c), STATUS_TEXTS[2]);
@@ -431,7 +434,8 @@ const SCENARIOS = [
       const snap = await snapshotAll(c);
       asserts.check("保存される判断は1件だけ", snap.decisions.length, 1);
       asserts.check("その1件の参照", [snap.decisions[0].runKey, snap.decisions[0].rid], ["r101", "g102"]);
-      asserts.check("cert は不変", snap.cert, DUMMY.cert);
+      // F-22：読み込んだ旧形式は型式ラン × 法規行へ移ったうえで、判断の編集では変わらない
+      asserts.check("cert は不変", snap.cert, migrateLegacyCert(DUMMY.cert, DUMMY.runs, DUMMY.regs));
     },
   },
   {
@@ -582,8 +586,8 @@ const SCENARIOS = [
   },
   {
     id: "D6-regid-change",
-    name: "法規ID(reg.id)の変更で要再確認になり、認証実績の参照も外れる",
-    expect: "REG-1をREG-1Xに変えると、その法規の判断が要再確認になり、緑だったセルが赤へ変わる",
+    name: "法規ID(reg.id)の変更で要再確認になり、認証実績は法規行に付いたまま",
+    expect: "REG-1をREG-1Xに変えると、その法規の判断が要再確認になる。認証実績は法規行（rid）に付いているので緑のまま（F-22 A7。F-22より前は参照が外れて赤になっていた）",
     async run({ mount, asserts }) {
       const app = await mountWithDummy(mount);
       const c = app.container;
@@ -596,9 +600,10 @@ const SCENARIOS = [
       await openTab(c, "帳票"); await sleep(20);
 
       asserts.checkTrue("要再確認になる", cellText(c,0,0).includes("要再確認"));
-      asserts.check("実績参照が外れて赤へ", cellBorder(c,0,0), RED_RGB);
+      asserts.check("実績は付いてくる（緑のまま・F-22 A7）", cellBorder(c,0,0), GREEN_RGB);
+      asserts.checkTrue("認可番号も表示されたまま", cellText(c,0,0).includes("CK-1"));
       const snap = await snapshotAll(c);
-      asserts.check("cert 自体は書き換えていない", snap.cert, DUMMY.cert);
+      asserts.check("cert 自体は書き換えていない", snap.cert, migrateLegacyCert(DUMMY.cert, DUMMY.runs, DUMMY.regs));
       asserts.check("確定時条件のregIdは確定時のまま", findDec(snap,"r101","g101").cond.regId, "REG-1");
     },
   },

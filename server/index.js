@@ -3,8 +3,10 @@
 //   Node標準機能のみ（node:http + node:sqlite）。追加インストール不要。
 //   データは data/ilist.db（SQLiteファイル1個）に永続化。
 //   API:
-//     GET /api/data → { runs, regs, cert }
-//     PUT /api/data → 全置換保存（トランザクション）
+//     GET /api/data → { schemaVersion:2, runs, regs, cert:[{runKey,rid,ck,planned}] }
+//                     （まだ一度も版2で保存していないDBは、旧形式 { runs, regs, cert:{typeId:{regId:ck}} } を返す。
+//                       フロントが読込時に移行し、直後の自動保存で版2として書き戻す）
+//     PUT /api/data → 全置換保存（トランザクション）。受け付けるのは版2だけ
 //   dist/ があれば静的配信もする（npm run build 後は本番モードで単独起動できる）
 // ───────────────────────────────────────────────
 import { createServer } from "node:http";
@@ -49,12 +51,40 @@ db.exec(`
     ck      TEXT NOT NULL,
     PRIMARY KEY (typeId, regId)
   );
+  -- F-22：認証実績を 型式ラン(run.key) × 法規行(rid) で持つ。旧 cert テーブル（型式 × 法規ID）は
+  -- 移行元として残し、読み書きしない（版2で保存した後は使わない。消さないのは既存データを壊さないため）。
+  CREATE TABLE IF NOT EXISTS cert_run (
+    runKey  TEXT NOT NULL,
+    rid     TEXT NOT NULL,
+    ck      TEXT NOT NULL,
+    planned INTEGER NOT NULL DEFAULT 0,
+    pos     INTEGER NOT NULL,
+    PRIMARY KEY (runKey, rid)
+  );
+  -- 保存データの版。行が無い＝旧形式のまま（まだ版2で保存していない）。
+  CREATE TABLE IF NOT EXISTS meta (
+    k TEXT PRIMARY KEY,
+    v TEXT NOT NULL
+  );
 `);
+// 旧DBの regs には rid 列が無い。列を足すだけで既存行の値は変えない（空文字で始まり、版2の初回保存で埋まる）。
+if (!db.prepare("PRAGMA table_info(regs)").all().some((c) => c.name === "rid")) {
+  db.exec("ALTER TABLE regs ADD COLUMN rid TEXT NOT NULL DEFAULT ''");
+}
+const SCHEMA_VERSION = 2;
+const schemaVersionOf = () => db.prepare("SELECT v FROM meta WHERE k = 'schemaVersion'").get()?.v;
 
-// ── 読み出し：テーブル → フロントのデータ形 { runs, regs, cert } ──
+// ── 読み出し：テーブル → フロントのデータ形 ──
 function loadData() {
   const runs = db.prepare("SELECT key, typeId, gen, sk, lo, dropDate FROM runs ORDER BY pos")
     .all().map(({ dropDate, ...r }) => ({ ...r, drop: dropDate }));
+  if (schemaVersionOf() === String(SCHEMA_VERSION)) {
+    const regs = db.prepare("SELECT rid, id, label, shin, kei, parent FROM regs ORDER BY pos").all();
+    const cert = db.prepare("SELECT runKey, rid, ck, planned FROM cert_run ORDER BY pos")
+      .all().map((c) => ({ runKey: c.runKey, rid: c.rid, ck: c.ck, planned: c.planned === 1 }));
+    return { schemaVersion: SCHEMA_VERSION, runs, regs, cert };
+  }
+  // 旧形式（版なし）：従来どおりの形で返す（rid は返さない。フロントが補って移行する）
   const regs = db.prepare("SELECT id, label, shin, kei, parent FROM regs ORDER BY pos").all();
   const cert = {};
   for (const row of db.prepare("SELECT typeId, regId, ck FROM cert").all()) {
@@ -64,25 +94,35 @@ function loadData() {
 }
 
 // ── 保存：全置換（途中で失敗したら元のまま残るようトランザクション） ──
+// 版2だけを書く。旧 cert テーブルには触れない（移行元として残す）。
+// 認証実績は受け取ったレコードをそのまま全件書く（空の番号も捨てない＝読み直したとき完全一致させる。F-22 A2）。
 function saveData({ runs, regs, cert }) {
   db.exec("BEGIN");
   try {
-    db.exec("DELETE FROM runs; DELETE FROM regs; DELETE FROM cert;");
+    db.exec("DELETE FROM runs; DELETE FROM regs; DELETE FROM cert_run;");
     const insRun = db.prepare("INSERT INTO runs (key, typeId, gen, sk, lo, dropDate, pos) VALUES (?,?,?,?,?,?,?)");
     runs.forEach((r, i) => insRun.run(String(r.key), r.typeId ?? "", r.gen ?? "", r.sk ?? "新", r.lo ?? "", r.drop ?? "", i));
-    const insReg = db.prepare("INSERT INTO regs (id, label, shin, kei, parent, pos) VALUES (?,?,?,?,?,?)");
-    regs.forEach((r, i) => insReg.run(r.id ?? "", r.label ?? "", r.shin ?? "", r.kei ?? "", r.parent ?? "", i));
-    const insCert = db.prepare("INSERT INTO cert (typeId, regId, ck) VALUES (?,?,?)");
-    for (const [typeId, byReg] of Object.entries(cert)) {
-      for (const [regId, ck] of Object.entries(byReg)) {
-        if (ck) insCert.run(typeId, regId, String(ck));
-      }
-    }
+    const insReg = db.prepare("INSERT INTO regs (rid, id, label, shin, kei, parent, pos) VALUES (?,?,?,?,?,?,?)");
+    regs.forEach((r, i) => insReg.run(r.rid, r.id ?? "", r.label ?? "", r.shin ?? "", r.kei ?? "", r.parent ?? "", i));
+    const insCert = db.prepare("INSERT INTO cert_run (runKey, rid, ck, planned, pos) VALUES (?,?,?,?,?)");
+    cert.forEach((c, i) => insCert.run(c.runKey, c.rid, c.ck, c.planned ? 1 : 0, i));
+    db.prepare("INSERT OR REPLACE INTO meta (k, v) VALUES ('schemaVersion', ?)").run(String(SCHEMA_VERSION));
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
   }
+}
+
+// PUT本文が版2の形か。問題があればエラー文、無ければ null（形だけを見る。業務ルールは見ない）。
+function invalidV2(d) {
+  if (d.schemaVersion !== SCHEMA_VERSION) return `schemaVersion ${SCHEMA_VERSION} のデータだけ保存できます`;
+  if (!Array.isArray(d.cert)) return "cert が配列ではありません";
+  if (!d.regs.every((r) => r && typeof r.rid === "string" && r.rid !== "")) return "regs の各行に rid が必要です";
+  const ok = (c) => c && typeof c.runKey === "string" && typeof c.rid === "string" &&
+    typeof c.ck === "string" && typeof c.planned === "boolean";
+  if (!d.cert.every(ok)) return "cert の各件は { runKey, rid, ck, planned } の形が必要です";
+  return null;
 }
 
 const json = (res, code, obj) => {
@@ -106,6 +146,9 @@ const server = createServer((req, res) => {
           const d = JSON.parse(body);
           if (!Array.isArray(d.runs) || !Array.isArray(d.regs) || typeof d.cert !== "object")
             return json(res, 400, { error: "runs / regs / cert が必要です" });
+          // 版2だけ受け付ける（旧形式を書き込ませると、版2のDBに型式単位の実績が混ざる）
+          const bad = invalidV2(d);
+          if (bad) return json(res, 400, { error: bad });
           saveData(d);
           json(res, 200, { ok: true });
         } catch (e) {

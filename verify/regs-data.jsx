@@ -17,6 +17,7 @@ import IListApp, {
   SEED, parseImportedData, replaceBootData, readBootData, evalCellWith,
   baseCandidates, baseOf, setBase, samenessMatters, samenessAffects, effectiveSameness, sweepSameness,
   nextSamenessRecord, SAMENESS_VALUES,
+  migrateLegacyCert,
 } from "../src/IListApp.jsx";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -385,7 +386,9 @@ const SCENARIOS = [
       let snap = await snapshotAll(c);
       asserts.check("旧データ：bases は空", snap.bases, []);
       asserts.check("旧データ：sameness は空", snap.sameness, []);
-      asserts.check("旧データ：既存3領域は変わらない", [snap.runs, snap.regs, snap.cert], [legacy.runs, legacy.regs, legacy.cert]);
+      // F-22：cert は読み込み時に型式ラン × 法規行へ移る（同じ規則で作った期待値と比べる）。runs/regs は変わらない。
+      asserts.check("旧データ：既存3領域は変わらない（cert は版2へ移行）", [snap.runs, snap.regs, snap.cert],
+        [legacy.runs, legacy.regs, migrateLegacyCert(legacy.cert, legacy.runs, legacy.regs)]);
       asserts.checkTrue("同一性の表示なし", !c.querySelector("table tbody").textContent.includes("同一性："));
       await openTab(c, "型式ラン");
       asserts.check("全ラン未選択", baseSelects(c).map((s) => s.value), ["", "", "", "", ""]);
@@ -395,8 +398,11 @@ const SCENARIOS = [
       asserts.check("rid の無い旧JSONも受理", parseImportedData(noRid).ok, true);
 
       // 値入りデータの往復
+      // F-22：書き出しは版2。往復で完全一致を見るため、入力も版2の文書にする（cert は同じ規則で移した形）。
       const full = {
+        schemaVersion: 2,
         ...clone(DUMMY),
+        cert: migrateLegacyCert(DUMMY.cert, DUMMY.runs, DUMMY.regs),
         decisions: [],
         bases: [{ runKey: "r202", baseRunKey: "r201", decidedAt: STAMP }, { runKey: "r203", baseRunKey: "r204", decidedAt: "2026-09-18 08:00" }],
         sameness: [
@@ -503,7 +509,7 @@ const SCENARIOS = [
       const walk = (o) => { if (o && typeof o === "object") for (const [k, v] of Object.entries(o)) { keys.push(k); walk(v); } };
       walk(snap);
       asserts.check("車名・車種系のキーなし", keys.filter((k) => /車名|車種|car|vehicle|model/i.test(k)), []);
-      asserts.check("トップレベルの項目", Object.keys(snap), ["runs", "regs", "cert", "decisions", "bases", "sameness"]);
+      asserts.check("トップレベルの項目", Object.keys(snap), ["schemaVersion", "runs", "regs", "cert", "decisions", "bases", "sameness"]);
       await openTab(c, "型式ラン");
       const labels = [...c.querySelectorAll("th, label, [aria-label], input[placeholder]")]
         .map((e) => e.textContent + (e.getAttribute("aria-label") || "") + (e.getAttribute("placeholder") || ""));
@@ -681,9 +687,12 @@ const SCENARIOS = [
       asserts.checkTrue("編集欄にも要再確認は出ない", !td().textContent.includes("要再確認"));
       await clickByText(td(), /キャンセル/);
       await openTab(c, "認可書実績");
-      const inp = [...c.querySelectorAll('input[placeholder="認可書番号"]')].find((i) => i.value === "CK-QN");
-      setNativeValue(inp, "");
-      await sleep(20);
+      // F-22：認可書実績は型式ランごとの欄になった。DEMO-Q の2ラン（r202・r203）の欄を両方空にする
+      // （F-22より前の「型式 DEMO-Q × REG-N の欄を空にする」と同じ効き方）。
+      for (let inp; (inp = [...c.querySelectorAll('input[placeholder="認可書番号"]')].find((i) => i.value === "CK-QN")); ) {
+        setNativeValue(inp, "");
+        await sleep(20);
+      }
       await openTab(c, "帳票");
       asserts.checkTrue("実績を消すと要再確認が出る", hasRecheck(c, "r202", "g201"));
       await chooseBase(c, "r203", "r204");

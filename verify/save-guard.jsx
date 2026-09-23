@@ -339,7 +339,12 @@ const SCENARIOS = [
       asserts.checkTrue("編集後にPUTが増えた", puts().length > putsAfterLoad);
       asserts.check("PUT本文のtypeId", lastPut?.body.runs.map((r) => r.typeId), ["EDIT-TEST-0001"]);
       asserts.check("既存regsを保持", lastPut?.body.regs.map((r) => r.id), ["TESTPRE-REG"]);
-      asserts.check("既存certを保持", lastPut?.body.cert?.["TESTPRE-0001"]?.["TESTPRE-REG"], "TESTPRE-CK-01");
+      // F-22：旧形式のDB応答は読込時に型式ラン × 法規行へ移り、版2としてPUTされる。
+      // 認証実績は型式記号ではなく型式ランに付くので、型式記号を編集しても外れない（A7）。
+      asserts.check("PUT本文は版2", lastPut?.body.schemaVersion, 2);
+      asserts.check("既存certを保持（型式ラン r900 × 既存の法規行）",
+        lastPut?.body.cert?.map((c) => [c.runKey, c.rid === lastPut?.body.regs[0]?.rid, c.ck, c.planned]),
+        [["r900", true, "TESTPRE-CK-01", false]]);
       asserts.check("表示", readSaveStatusText(app.container), "サーバに保存済み");
 
       // 再読込：保存された内容をサーバが返す想定で再マウントし、反映を確認
@@ -403,7 +408,11 @@ const SCENARIOS = [
       const emptyPut = puts()[0];
       asserts.check("空応答時のPUT本文 runs.typeId", [...new Set(emptyPut?.body.runs.map((r) => r.typeId))], EXPECTED_SEED_TYPE_IDS);
       asserts.check("空応答時のPUT本文 regs.id", emptyPut?.body.regs.map((r) => r.id), EXPECTED_SEED_REG_IDS);
-      asserts.check("空応答時のPUT本文 certキー", Object.keys(emptyPut?.body.cert ?? {}), EXPECTED_SEED_TYPE_IDS);
+      // F-22：cert は型式ラン × 法規行の配列。SEEDの4型式すべてのランに実績が入っていることを型式単位で確かめる。
+      asserts.check("空応答時のPUT本文は版2", emptyPut?.body.schemaVersion, 2);
+      asserts.check("空応答時のPUT本文 certの型式",
+        [...new Set((emptyPut?.body.cert ?? []).map((c) => emptyPut.body.runs.find((r) => r.key === c.runKey)?.typeId))],
+        EXPECTED_SEED_TYPE_IDS);
       asserts.check("空応答時の表示", readSaveStatusText(app1.container), "サーバに保存済み");
       app1.unmount();
 
@@ -422,6 +431,10 @@ const SCENARIOS = [
       asserts.check("isValidData {cert:null}", isValidData({ runs: [], regs: [], cert: null }), false);
       asserts.check("isValidData {runs:'x'}", isValidData({ runs: "x", regs: [], cert: {} }), false);
       asserts.check("isValidData null", isValidData(null), false);
+      // F-22：版2は cert が配列。知らない版・版2で cert がオブジェクトは受け付けない
+      asserts.check("isValidData 版2 {cert:[]}", isValidData({ schemaVersion: 2, runs: [], regs: [], cert: [] }), true);
+      asserts.check("isValidData 版2 {cert:{}}", isValidData({ schemaVersion: 2, runs: [], regs: [], cert: {} }), false);
+      asserts.check("isValidData 版3", isValidData({ schemaVersion: 3, runs: [], regs: [], cert: [] }), false);
     },
   },
   {

@@ -22,6 +22,7 @@ import {
   decideCell, effectiveSideOf, certPlanOf, productionPhaseOf, deadlineOf, makeSamenessContext,
   evalCellWith, complianceStateOf, complianceOfDecision, approachingNoticeFor, parseImportedData,
   MatrixView, summarize, PRODUCTION_PHASES, CELL_DISPLAYS,
+  migrateLegacyCert,
 } from "../src/IListApp.jsx";
 import { DECISION_CASES } from "./decision-table-cases.js";
 
@@ -272,7 +273,8 @@ const SCENARIOS = [
       // 画面：引き継ぎ確認中は、いまの認証実績（型式×法規）では実データから作れない（F-19 未決事項）。
       // そこで MatrixView へ渡す evalCell のほうで handover を立て、見た目だけを確かめる。
       // 製品の経路（StandaloneApp・IListApp）は常に handover=false を渡すので、ここは見た目専用のダミーである。
-      const runs = DISPLAY_DUMMY.runs, regs = DISPLAY_DUMMY.regs, cert = DISPLAY_DUMMY.cert;
+      // ダミーの認証実績は旧形式で書いてある。読み込み時と同じ規則（F-22 A5）で型式ラン × 法規行へ移して渡す。
+      const runs = DISPLAY_DUMMY.runs, regs = DISPLAY_DUMMY.regs, cert = migrateLegacyCert(DISPLAY_DUMMY.cert, runs, regs);
       const evalCellHandover = (run, r) => {
         const e = evalCellWith(cert, run, r);
         return run.key === "r612" ? { ...e, handover: true } : e;
@@ -404,9 +406,10 @@ const SCENARIOS = [
     name: "C6：要否・色・認可書番号は変わらない（変わるのは期限の表示と列見出しだけ）",
     expect: "要否と黄色予告の入口（evalCellWith・approachingNoticeFor）が従来どおりの形の値を返す",
     run: async ({ mount, asserts }) => {
-      const run = { typeId: "DEMO-Q", sk: "継", lo: LONG_AGO, drop: FAR };
-      const reg = { id: "REG-P", shin: LONG_AGO, kei: LONG_AGO };
-      const e = evalCellWith({ "DEMO-Q": { "REG-P": "CK-1" } }, run, reg);
+      // F-22：認証実績は型式ラン × 法規行で引くので、ダミーのラン・法規行にキー（key・rid）を持たせる
+      const run = { key: "r699", typeId: "DEMO-Q", sk: "継", lo: LONG_AGO, drop: FAR };
+      const reg = { rid: "g699", id: "REG-P", shin: LONG_AGO, kei: LONG_AGO };
+      const e = evalCellWith([{ runKey: "r699", rid: "g699", ck: "CK-1", planned: false }], run, reg);
       asserts.check("認可書ありは緑のまま", [e.required, e.kind, e.ck, e.status], [true, "継続", "CK-1", "ok"]);
       const e2 = evalCellWith({}, run, reg);
       asserts.check("認可書なしは申請発生のまま", [e2.required, e2.kind, e2.ck, e2.status], [true, "継続", null, "leak"]);
