@@ -133,6 +133,12 @@ try {
   // ④ 組の重複はトランザクションごと取り消す
   check("組の重複のPUTは400", await put({ ...V2, cert: [...V2.cert, { ...V2.cert[0] }] }), 400);
   check("重複で失敗してもDBは直前の版2のまま", await get(), V2);
+  // ④' 参照先の無い実績・rid の重複は拒否する（Codexレビュー指摘1：保存に成功した後で開けなくなるのを防ぐ）
+  check("存在しない型式ランを指す実績のPUTは400", await put({ ...V2, cert: [...V2.cert, { runKey: "r999", rid: "g7", ck: "X", planned: false }] }), 400);
+  check("存在しない法規行を指す実績のPUTは400", await put({ ...V2, cert: [...V2.cert, { runKey: "r1", rid: "g999", ck: "X", planned: false }] }), 400);
+  check("行が空で実績だけのPUTは400", await put({ schemaVersion: 2, runs: [], regs: [], cert: [{ runKey: "r1", rid: "g1", ck: "DEMO-CK", planned: false }] }), 400);
+  check("regs の rid 重複のPUTは400", await put({ ...V2, regs: [V2.regs[0], { ...V2.regs[1], rid: "g7" }] }), 400);
+  check("拒否してもDBは直前の版2のまま", await get(), V2);
   // ⑤ 空の cert・再起動
   const empty = { ...V2, cert: [] };
   check("空の cert を保存できる", await put(empty), 200);

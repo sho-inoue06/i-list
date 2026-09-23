@@ -550,6 +550,49 @@ const SCENARIOS = [
     },
   },
   {
+    id: "R2-api-v2-requires-rid",
+    name: "Codexレビュー指摘2：API版で版2の文書を読むとき、rid の無い法規行を補番して実績を結び付けない",
+    expect: "rid の無い法規行を含む版2のJSONは拒否し、state・PUTを変えない（単体版と同じ扱い）",
+    async run({ mountApi, asserts }) {
+      const m = installApiMock(API_V2);
+      try {
+        const a = mountApi().container;
+        await sleep(300); await sleep(WAIT_PAST_DEBOUNCE);
+        const before = m.puts.length;
+        window.__ALERTS__ = [];
+        selectFile(a, JSON.stringify({ schemaVersion: 2,
+          runs: [{ key: "r1", typeId: "DEMO-A", gen: "PJ-A", sk: "新", lo: "", drop: "" }],
+          regs: [{ id: "DEMO-B", label: "ダミーB", shin: "", kei: "", parent: "" }],
+          cert: [{ runKey: "r1", rid: "g7", ck: "DEMO-A-CK", planned: false }] }));
+        await sleep(150); await sleep(WAIT_PAST_DEBOUNCE);
+        asserts.check("拒否の知らせが出る", window.__ALERTS__.filter((x) => x.includes("rid")).length, 1);
+        asserts.check("PUTは増えない", m.puts.length - before, 0);
+        asserts.check("中身は元のまま", await snapshotApi(a), API_V2);
+      } finally { m.restore(); }
+    },
+  },
+  {
+    id: "R3-api-v2-empty-stays-empty",
+    name: "Codexレビュー指摘3：版2として保存済みの空データは、開き直しても空のまま（SEEDに置き換えない）",
+    expect: "版2の空応答ではSEEDを出さず、書き戻しも空。版なしの空応答（未初期化DB）は従来どおりSEEDを投入する",
+    async run({ mountApi, asserts }) {
+      const EMPTY_V2 = { schemaVersion: 2, runs: [], regs: [], cert: [] };
+      const m = installApiMock(EMPTY_V2);
+      try {
+        const a = mountApi().container;
+        await sleep(300); await sleep(WAIT_PAST_DEBOUNCE);
+        asserts.check("SEEDの型式を出さない", a.textContent.includes("DEMO-0001"), false);
+        asserts.check("書き戻しは空のまま", m.puts.map((b) => [b.runs.length, b.regs.length, b.cert.length]), [[0, 0, 0]]);
+      } finally { m.restore(); }
+      const m2 = installApiMock({ runs: [], regs: [], cert: {} });
+      try {
+        const a = mountApi().container;
+        await sleep(300); await sleep(WAIT_PAST_DEBOUNCE);
+        asserts.check("版なしの空応答はSEEDを投入（従来どおり）", [a.textContent.includes("DEMO-0001"), m2.puts[0]?.runs.length], [true, SEED.runs.length]);
+      } finally { m2.restore(); }
+    },
+  },
+  {
     id: "B1-B5-same-view",
     name: "見え方と判定の結論が変わらない（旧形式の入口と、移行後の入口を突き合わせる）",
     expect: "SEEDと、法規IDの重複・空、空白だけ・空文字の番号、付け先の無い実績、比較元・同一性を混ぜた300組のダミーで、全セルの判定・色の元になる表示区分・漏れ一覧・実効drop・危険一覧が1件も違わない",

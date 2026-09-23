@@ -114,14 +114,20 @@ function saveData({ runs, regs, cert }) {
   }
 }
 
-// PUT本文が版2の形か。問題があればエラー文、無ければ null（形だけを見る。業務ルールは見ない）。
+// PUT本文が版2の形か。問題があればエラー文、無ければ null（形と参照のつながりだけを見る。業務ルールは見ない）。
+// 実績が存在しない型式ラン・法規行を指していたら拒否する。受け付けてしまうと保存は成功するのに、
+// 次に開いたときフロントの検証が拒否して「初回読込に失敗」になる（Codexレビュー指摘1）。
 function invalidV2(d) {
   if (d.schemaVersion !== SCHEMA_VERSION) return `schemaVersion ${SCHEMA_VERSION} のデータだけ保存できます`;
   if (!Array.isArray(d.cert)) return "cert が配列ではありません";
   if (!d.regs.every((r) => r && typeof r.rid === "string" && r.rid !== "")) return "regs の各行に rid が必要です";
+  const rids = new Set(d.regs.map((r) => r.rid));
+  if (rids.size !== d.regs.length) return "regs の rid が重複しています";
+  const runKeys = new Set(d.runs.map((r) => String(r?.key)));
   const ok = (c) => c && typeof c.runKey === "string" && typeof c.rid === "string" &&
     typeof c.ck === "string" && typeof c.planned === "boolean";
   if (!d.cert.every(ok)) return "cert の各件は { runKey, rid, ck, planned } の形が必要です";
+  if (!d.cert.every((c) => runKeys.has(c.runKey) && rids.has(c.rid))) return "cert が存在しない型式ラン・法規行を指しています";
   return null;
 }
 

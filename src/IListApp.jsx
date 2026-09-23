@@ -1798,6 +1798,10 @@ export function certOfLoaded(d, regs) {
   }
   if (d.schemaVersion !== SCHEMA_VERSION) return { ok: false, error: `schemaVersion ${JSON.stringify(d.schemaVersion)} はこのアプリが読めない版です。` };
   if (!Array.isArray(d.cert)) return { ok: false, error: "cert が配列ではありません。" };
+  // 版2では法規行の全行に rid が要る（単体版の parseImportedData と同じ）。補番した rid で検証すると、
+  // 元のデータでは結び付いていなかった実績が補番された法規行へ結び付いてしまう（Codexレビュー指摘2）。
+  const noRid = d.regs.findIndex((r) => r?.rid === undefined);
+  if (noRid !== -1) return { ok: false, error: `schemaVersion 2 のデータでは regs[${noRid}].rid が必要です（内部キーを補番して認証実績をつなぎ直すことはしません）。` };
   const bad = validateCertRecords(d.cert, new Set(d.runs.map((r) => r?.key)), new Set(regs.map((r) => r?.rid)));
   if (bad) return { ok: false, error: bad };
   return { ok: true, cert: d.cert };
@@ -2012,7 +2016,9 @@ export default function IListApp() {
       .then((d) => {
         if (cancelled) return;
         if (!isValidData(d)) throw new Error("不正な応答形式です");
-        if (d.runs.length || d.regs.length || (Array.isArray(d.cert) ? d.cert.length : Object.keys(d.cert).length)) {
+        // 版2の応答は「一度保存されたデータ」なので、空でもそのまま使う（全件削除して保存した空をSEEDへ戻さない。Codexレビュー指摘3）。
+        // 版なしで空の応答は未初期化のDBなので、従来どおりSEEDのまま（直後の自動保存でSEEDが入る）。
+        if (d.schemaVersion === SCHEMA_VERSION || d.runs.length || d.regs.length || Object.keys(d.cert).length) {
           // 法規行の内部キー(rid)は旧形式のサーバDB（SQLがridを返さない形）には無いので補う。
           // 受理条件は変えず、値の削除・統合・改名もしない（付け足すだけ）。
           // 補完は共有カウンタを変えない planRegKeys で行い、反映時にまとめて採番を進める。
