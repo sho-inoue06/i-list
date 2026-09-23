@@ -518,7 +518,8 @@ const SCENARIOS = [
       const before = basisTable(DUMMY);
       const c = await mountWith(mount, DUMMY);
       const snap = await snapshotAll(c);
-      asserts.check("書き出したデータの項目は従来どおり", Object.keys(snap).sort(), ["bases", "cert", "decisions", "regs", "runs", "sameness"]);
+      // F-22：書き出しは版番号（schemaVersion）付きの版2になる。それ以外の項目は従来どおり。
+      asserts.check("書き出したデータの項目は従来どおり＋版番号", Object.keys(snap).sort(), ["bases", "cert", "decisions", "regs", "runs", "sameness", "schemaVersion"]);
       const reparsed = parseImportedData(clone(snap));
       asserts.check("書き出したデータを読み戻せる", reparsed.ok, true);
       asserts.check("JSON往復で根拠が変わらない", basisTable(reparsed.data), before);
@@ -562,8 +563,9 @@ const SCENARIOS = [
       const snap = await snapshotAll(c);
       asserts.check("保存データに根拠の項目は増えない",
         [Object.keys(snap).includes("basis"), JSON.stringify(snap).includes("根拠")], [false, false]);
-      asserts.check("保存データの中身は読み込んだものと一致", snap,
-        { runs: RUNS, regs: REGS, cert: {}, decisions: [], bases: BASES, sameness: SAMENESS });
+      // F-22：旧形式（版なし・cert:{}）で読み込んだものは版2で書き出される。空の認証実績は空配列へ移る。
+      asserts.check("保存データの中身は読み込んだものと一致（版2へ移行した形）", snap,
+        { schemaVersion: 2, runs: RUNS, regs: REGS, cert: [], decisions: [], bases: BASES, sameness: SAMENESS });
     },
   },
 ];

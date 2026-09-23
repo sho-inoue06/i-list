@@ -19,6 +19,7 @@ import { createRoot } from "react-dom/client";
 import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
   TODAY, todayStr, parseImportedData, evalCellWith, summarize, approachingNoticeFor, approachingKeiDays,
+  migrateLegacyCert,
 } from "../src/IListApp.jsx";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -117,6 +118,9 @@ const SAME_DUMMY = {
 };
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
+// ダミーの認証実績は旧形式（型式 × 法規ID）で書いてある（API版のモック応答で移行の経路も通すため）。
+// 純関数へ直接渡すときは、読み込み時と同じ規則（F-22 A5）で型式ラン × 法規行へ移してから渡す。
+const certOf = (d) => migrateLegacyCert(d.cert, d.runs, d.regs);
 const fmt = (d) => d.replaceAll("-", "/").slice(0, 7);   // 画面表示（YYYY/MM）と同じ整形
 
 // ── 画面ユーティリティ ──
@@ -248,7 +252,7 @@ const SCENARIOS = [
       const c = await mountWith(mount, EFF_DUMMY);
       const t = cardText(c, "実効ドロップ（規制で縛られる期限）");
       asserts.check("実効日の内訳（純関数）",
-        summarize(EFF_DUMMY.runs, EFF_DUMMY.regs, EFF_DUMMY.cert).effDrop,
+        summarize(EFF_DUMMY.runs, EFF_DUMMY.regs, certOf(EFF_DUMMY)).effDrop,
         { r311: YESTERDAY, r312: TODAY_D, r313: TOMORROW });
       asserts.check("既発効は2件（前日・当日）", (t.match(/既発効/g) || []).length, 2);
       asserts.checkTrue("DEMO-S（前日）は既発効", /DEMO-S（PJ-1）\s*実効 既発効/.test(t));
@@ -332,12 +336,12 @@ const SCENARIOS = [
   {
     id: "A7-no-base-date-anywhere",
     name: "基準日を固定する手段を、画面にも保存データにも持たない",
-    expect: "書き出したJSONのキーは runs/regs/cert/decisions/bases/sameness だけ。画面に基準日の入力欄がない",
+    expect: "書き出したJSONのキーは runs/regs/cert/decisions/bases/sameness と版番号 schemaVersion（F-22）だけ。画面に基準日の入力欄がない",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, SAME_DUMMY);
       const snap = await snapshotAll(c);
       asserts.check("保存データのキー", Object.keys(snap).sort(),
-        ["bases", "cert", "decisions", "regs", "runs", "sameness"]);
+        ["bases", "cert", "decisions", "regs", "runs", "sameness", "schemaVersion"]);
       const labels = [...c.querySelectorAll("input,select,textarea")].map((e) => e.getAttribute("aria-label") || "");
       asserts.check("基準日・今日の入力欄がない", labels.filter((l) => /基準日|今日/.test(l)), []);
       asserts.checkTrue("画面に『基準日』の文字がない", !c.textContent.includes("基準日"));

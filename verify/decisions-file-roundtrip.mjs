@@ -96,7 +96,11 @@ const input = {
   ],
 };
 // 期待値は出力から作らず、入力に対する仕様（両判断でtrueになる）から保存操作前に定める。
-const expected = { ...input, decisions: input.decisions.map((d) => ({ ...d, needsRecheck: true })) };
+// F-22：入力は旧形式（版なし）の cert。読込時に型式ラン × 法規行へ移り、書き出しは版2になる。
+// 移行後の形も製品コードを通さず、入力から手で書く（DEMO-ROUNDTRIP のランは r101 だけ、DUMMY-PARENT の法規行は g101 だけ）。
+const expected = { schemaVersion: 2, ...input,
+  cert: [{ runKey: "r101", rid: "g101", ck: "DUMMY-CERT", planned: false }],
+  decisions: input.decisions.map((d) => ({ ...d, needsRecheck: true })) };
 const inputPath = join(OUT, "roundtrip-input.json");
 writeFileSync(inputPath, JSON.stringify(input, null, 2));
 writeFileSync(join(OUT, "roundtrip-expected.json"), JSON.stringify(expected, null, 2));

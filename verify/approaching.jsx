@@ -20,6 +20,7 @@ import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
   TODAY, parseImportedData, evalCellWith, complianceStateOf,
   approachingKeiDays, approachingNoticeFor, condOf,
+  migrateLegacyCert,
 } from "../src/IListApp.jsx";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -331,7 +332,7 @@ const SCENARIOS = [
       // 人の適用判断・要再確認・保存データは変わらない
       const cj = await mountWith(mount, JUDGE_DUMMY);
       const snap = await snapshotAll(cj);
-      asserts.check("保存データのキー", Object.keys(snap).sort(), ["bases", "cert", "decisions", "regs", "runs", "sameness"]);
+      asserts.check("保存データのキー", Object.keys(snap).sort(), ["bases", "cert", "decisions", "regs", "runs", "sameness", "schemaVersion"]);
       asserts.check("判断は読み込んだままの値", snap.decisions, JUDGE_DUMMY.decisions);
       asserts.check("要再確認は増えない", snap.decisions.filter((d) => d.needsRecheck).length, 0);
       asserts.checkTrue("画面にも要再確認は出ない", !cellText(cj, ROW.g501, COL.r501).includes("要再確認"));

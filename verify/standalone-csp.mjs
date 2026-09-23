@@ -180,7 +180,9 @@ const savedJSON = await download("JSONに書き出し", ".json");
   const d = JSON.parse(readFileSync(savedJSON, "utf8"));
   check("JSON書出し：URL風文字列がそのまま保たれる", d.regs?.[1]?.label, URLISH);
   check("JSON書出し：HTML風の理由がそのまま保たれる", d.decisions?.[0]?.reason, HTMLISH);
-  check("JSON書出し：runs/regs/certが保たれる", [d.runs, d.regs?.length, d.cert], [input.runs, 2, input.cert]);
+  // F-22：旧形式（版なし）で読んだ cert は型式ラン × 法規行へ移り、書き出しは版2になる（期待値は入力から手で書く）
+  check("JSON書出し：runs/regs/certが保たれる（cert は版2へ移行）", [d.schemaVersion, d.runs, d.regs?.length, d.cert],
+    [2, input.runs, 2, [{ runKey: "r201", rid: "g201", ck: "DUMMY-CERT", planned: false }]]);
 }
 
 // ── ④ データ入りHTML保存（BlobダウンロードがCSP下で通ること） ──

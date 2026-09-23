@@ -98,6 +98,104 @@ export function seedDate(offsetDays, today = TODAY) {
   return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())}`;
 }
 
+// ───────────────────────────────────────────────
+// 認証実績（cert）の保存単位（F-22）
+//
+// 認証実績は「型式ラン × 法規行」で1件持つ。結合キーは run.key と reg.rid の2つ
+// （人の適用判断 decisions・同一性 sameness と同じ単位・同じ持ち方）。
+//
+//   cert … 配列。1件＝{ runKey, rid, ck, planned }
+//     runKey  … 型式ランの run.key
+//     rid     … 法規行の内部キー reg.rid（利用者が入力する法規ID reg.id ではない）
+//     ck      … 管理番号（文字列）。認可番号とPACT番号を区別せず1欄で持つ。空文字＝番号なし
+//     planned … 取得予定（真偽値）。F-22では器だけ用意し、画面からは常に false のまま
+//               （判定にも使わない。入力UIと表示はF-23）
+//   レコードが無い＝番号なし・予定なし。組 (runKey, rid) の重複は持たない。
+//
+// runKey と rid を1本の文字列へ連結しない（run.key は外部JSON経由で任意の文字列になりうるため。
+// decisions と同じ理由）。型式記号・法規IDは結合に使わないので、それらを変えても実績は付いてくる。
+//
+// 保存データの版（schemaVersion）
+//   版なし … 旧形式。cert = { [typeId]: { [regId]: 認可番号(文字列) } }（型式 × 法規ID）
+//   2      … この形式
+// 旧形式は読み込み時に migrateLegacyCert で移し替える（下の規則）。
+// ───────────────────────────────────────────────
+export const SCHEMA_VERSION = 2;
+
+// 旧形式（型式 × 法規ID）から新形式（型式ラン × 法規行）への移し替え（F-22 A5）。
+//   ・旧 cert[typeId][regId] の値を、その型式の *すべての* 型式ランへ複製する
+//     （旧形式では同じ型式のランが全部同じ実績を読んでいたので、見え方がそのまま保たれる）。
+//   ・同じ reg.id を持つ法規行が複数あれば、そのすべてへ複製する（旧形式でも全行が同じ値を読んでいた）。
+//   ・付け先の型式ラン・法規行が無いエントリは破棄する（旧形式でも画面・判定のどこからも読まれていなかった）。
+//   ・取得予定は全件 false で始まる（旧形式は予定を持たない）。
+//   ・空文字の番号もそのまま移す（旧形式でも空文字は「実績なし」と読まれていた＝見え方は変わらない）。
+// 同じ型式の中の複製だけで、別の型式の実績は読まない・写さない（決定B）。
+// 並びは runs の順 × regs の順（入力が同じなら出力も同じ）。
+// ※ SEED の組み立てからも呼ぶので、このファイルの後ろで定義する定数を参照しないこと。
+export function migrateLegacyCert(legacy, runs, regs) {
+  const out = [];
+  const own = (o, k) => !!o && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k);
+  for (const run of runs || []) {
+    if (!own(legacy, run.typeId)) continue;
+    const byReg = legacy[run.typeId];
+    for (const reg of regs || []) {
+      if (!own(byReg, reg.id)) continue;
+      const ck = byReg[reg.id];
+      if (typeof ck !== "string") continue;
+      out.push({ runKey: run.key, rid: reg.rid, ck, planned: false });
+    }
+  }
+  return out;
+}
+
+// (runKey, rid) で認証実績を引くための索引。decisionIndex と同じく入れ子のMapにする。
+// 判定はセルごとに呼ばれるので、同じ配列に対しては1回だけ作って使い回す
+// （state の配列は変更のたびに作り直されるので、配列そのものをキーにしてよい）。
+const certIndexCache = new WeakMap();
+export function certIndex(cert) {
+  if (!Array.isArray(cert)) return new Map();
+  let m = certIndexCache.get(cert);
+  if (m) return m;
+  m = new Map();
+  for (const c of cert) {
+    if (!m.has(c.runKey)) m.set(c.runKey, new Map());
+    m.get(c.runKey).set(c.rid, c);
+  }
+  certIndexCache.set(cert, m);
+  return m;
+}
+export function findCert(cert, runKey, rid) {
+  return certIndex(cert).get(runKey)?.get(rid) || null;
+}
+
+// 管理番号を1件書き換える（認可書実績の編集画面）。
+// 番号が空で予定も無いレコードは持たない（レコードが無い＝番号なし・予定なし）。
+// 既存レコードは並びの位置を保ったまま書き換える。変化が無ければ同じ配列を返す。
+export function setCertNumber(cert, runKey, rid, ck) {
+  const list = Array.isArray(cert) ? cert : [];
+  const i = list.findIndex((c) => c.runKey === runKey && c.rid === rid);
+  if (i === -1) {
+    if (ck === "") return list;
+    return [...list, { runKey, rid, ck, planned: false }];
+  }
+  const cur = list[i];
+  if (cur.ck === ck) return list;
+  if (ck === "" && !cur.planned) return list.filter((_, j) => j !== i);
+  const next = list.slice();
+  next[i] = { ...cur, ck };
+  return next;
+}
+
+// 行の削除と同じ操作で、その行を参照する認証実績を取り除く（F-22 A7）。変化が無ければ同じ配列を返す。
+export const pruneCertByRun = (cert, runKey) => {
+  const list = Array.isArray(cert) ? cert : [];
+  return list.some((c) => c.runKey === runKey) ? list.filter((c) => c.runKey !== runKey) : list;
+};
+export const pruneCertByReg = (cert, rid) => {
+  const list = Array.isArray(cert) ? cert : [];
+  return list.some((c) => c.rid === rid) ? list.filter((c) => c.rid !== rid) : list;
+};
+
 // ダミーデータ（架空の型式・法規・認可書番号。実車・実データとは無関係）
 //
 // 日付はすべて seedDate（今日からの相対日数）で作る。括弧内の数字は「今日から何日」。
@@ -131,15 +229,17 @@ export function seedDate(offsetDays, today = TODAY) {
 //   ＝ いま30日窓に入りうる継続車規制日は REG-A2(+200)・REG-C(+5)・REG-E(+165) の3つで、
 //      drop が窓に入るランは r6（drop +150 と REG-E の +165）だけになる。
 //
-// ■ 認証実績は 型式 × 法規 で1つ（プロジェクト別の認可番号欄は無い）。
-//   同じ型式×法規に番号があれば、その型式の全プロジェクトのランが実績ありになる（A5）。
+// ■ 認証実績は 型式ラン × 法規行 で持つ（F-22）。ダミーでは、同じ型式の全ランに同じ番号を入れてある
+//   （F-22より前の「型式 × 法規で1つ」と同じ見え方。DEMO-0001×REG-A が3プロジェクトとも緑になる＝A5）。
 //
 // 「今日」を受け取る組み立て関数にしてある。**日付をここに直接書かないため**である
 // （固定日付を1つ混ぜても、その日は正しく見えてしまい、翌日から静かに意味を失う）。
 // 検証は別の「今日」で組み立て直し、全部の日付が同じだけ動くことを確かめられる（A3・A8）。
 export function buildSeed(today = TODAY) {
   const d = (n) => seedDate(n, today);
-  return {
+  const seed = {
+    // 保存データの版（F-22）。SEEDもそのまま読込検証を通る版2のデータにしておく。
+    schemaVersion: SCHEMA_VERSION,
     // プロジェクトコードは任意の識別記号（000A・000B…）。世代・前後関係は表さない。
     //   000A：DEMO-0001 だけ
     //   000B：DEMO-0001 が続き、途中で DEMO-0002 が追加される（LOが違う）
@@ -168,13 +268,6 @@ export function buildSeed(today = TODAY) {
       {rid:"g5", id:"DEMO-REG-D",   label:"ダミー法規D",   shin:d(-2400),kei:d(-1700),parent:""},
       {rid:"g6", id:"DEMO-REG-E",   label:"ダミー法規E",   shin:d(130),  kei:d(165),  parent:""},
     ],
-    // 認可書実績（型式 × 法規）。DEMO-0003 は REG-C を取り漏らしている＝現在法規不適合の1件。
-    cert:{
-      "DEMO-0001": {"DEMO-REG-A":"DEMO*A00/00*01","DEMO-REG-B":"DEMO*B00/00*01","DEMO-REG-D":"DEMO*D00/00*01"},
-      "DEMO-0002": {"DEMO-REG-A":"DEMO*A00/00*02","DEMO-REG-D":"DEMO*D00/00*02"},
-      "DEMO-0003": {"DEMO-REG-A":"DEMO*A00/00*03","DEMO-REG-A2":"DEMO*A02/00*01","DEMO-REG-B":"DEMO*B00/00*02","DEMO-REG-D":"DEMO*D00/00*03"},
-      "DEMO-0004": {"DEMO-REG-A":"DEMO*A00/00*04","DEMO-REG-A2":"DEMO*A02/00*02","DEMO-REG-D":"DEMO*D00/00*04"},
-    },
     // 比較元・同一性（F-04）の例。単体版の初期表示だけが使う（API版はこの2つを持たない）。
     //   r3×B 同一       … 継続車日を借りて「否」（新継どおりなら新型車日で期日到来）
     //   r5×B 同一でない … 000Cで装置変更。新型車日（過去）で申請発生（dropも過去なので 過去に法規不適合 表示）
@@ -197,18 +290,33 @@ export function buildSeed(today = TODAY) {
       {runKey:"r7",rid:"g4",value:"未確認",reason:"ダミー：確認し直すため未確認に戻した",decidedAt:"",needsRecheck:true,baseRunKey:""},
     ],
   };
+  // 認可書実績（F-22：型式ラン × 法規行）。
+  // 番号は型式ごとに下の表で持ち、旧形式の移行と同じ規則（migrateLegacyCert）でその型式の全ランへ展開する。
+  // こうしておくと、F-22の前（型式 × 法規で1つ）と見え方が1セルも変わらない（F-22 B1）。
+  // DEMO-0003 は REG-C を取り漏らしている＝現在法規不適合の1件。
+  seed.cert = migrateLegacyCert({
+    "DEMO-0001": {"DEMO-REG-A":"DEMO*A00/00*01","DEMO-REG-B":"DEMO*B00/00*01","DEMO-REG-D":"DEMO*D00/00*01"},
+    "DEMO-0002": {"DEMO-REG-A":"DEMO*A00/00*02","DEMO-REG-D":"DEMO*D00/00*02"},
+    "DEMO-0003": {"DEMO-REG-A":"DEMO*A00/00*03","DEMO-REG-A2":"DEMO*A02/00*01","DEMO-REG-B":"DEMO*B00/00*02","DEMO-REG-D":"DEMO*D00/00*03"},
+    "DEMO-0004": {"DEMO-REG-A":"DEMO*A00/00*04","DEMO-REG-A2":"DEMO*A02/00*02","DEMO-REG-D":"DEMO*D00/00*04"},
+  }, seed.runs, seed.regs);
+  return seed;
 }
 
 // 起動時のダミーデータ。モジュールの評価はページの読み込みごとに1回なので、
 // SEED＝そのページを開いた日の相対日付になる（TODAY と同じ考え方）。
 export const SEED = buildSeed();
 
-// サーバ応答が期待するデータ形 { runs:[], regs:[], cert:{} } かを判定する。
-// 配列も typeof は "object" になるため、cert は「nullでない・配列でないオブジェクト」であることまで確認する。
-// （cert:[] を通してしまうと、SEEDを保持したまま読込成功と誤認して保存に進む）
-export const isValidData = (d) =>
-  !!d && Array.isArray(d.runs) && Array.isArray(d.regs) &&
-  typeof d.cert === "object" && d.cert !== null && !Array.isArray(d.cert);
+// サーバ応答が期待するデータ形かを判定する（外側の形だけ）。受け付けるのは次の2つ：
+//   版なし（旧形式） … { runs:[], regs:[], cert:{} }。cert は「nullでない・配列でないオブジェクト」
+//     （配列も typeof は "object" になる。版なしで cert:[] を通すと、SEEDを保持したまま読込成功と誤認して保存に進む）
+//   schemaVersion 2 … { schemaVersion:2, runs:[], regs:[], cert:[] }（F-22）
+// それ以外の版は受け付けない（知らない版を旧形式として読み違えないため）。
+export const isValidData = (d) => {
+  if (!d || !Array.isArray(d.runs) || !Array.isArray(d.regs)) return false;
+  if (d.schemaVersion === undefined) return typeof d.cert === "object" && d.cert !== null && !Array.isArray(d.cert);
+  return d.schemaVersion === SCHEMA_VERSION && Array.isArray(d.cert);
+};
 
 // ───────────────────────────────────────────────
 // 日付の読み取り（判定はすべてこの見方だけを使う）
@@ -290,7 +398,7 @@ export function deadlineOf(規制日, lo, today = TODAY) {
 }
 
 // 認可書番号から認証・予定の3状態へ。
-// 「予定あり」は F-16（取得予定○）で人が入力するもので、いまのアプリは持たない。
+// 「予定あり」は取得予定（cert の planned）から作るもので、F-22では器だけ用意し判定には使わない（F-23）。
 // したがってアプリ側からは "実績あり" か "実績なし+予定なし" の2つしか渡らない。
 export const certPlanOf = (ck) => (ck ? "実績あり" : "実績なし+予定なし");
 
@@ -312,7 +420,7 @@ export function effectiveSideOf(run, sameness) {
 // セル1つの業務状態。判定はこの関数だけが行う（F-19 C1）。
 //   handover … 「引き継ぎ確認中」（同じ型式の過去ランに実績があり、当プロジェクトの番号は空）。
 //     表示の枝分かれだけに効き、要否・期限・不適合・黄色予告には一切効かない。
-//     いまの認証実績は 型式 × 法規 で持っているため実データでは作れない（F-19 未決事項）。
+//     認証実績は F-22 で 型式ラン × 法規行 の器へ移したが、導出して表示するのは F-23 の範囲。
 //     アプリ側は常に false を渡し、見た目の確認は検証ハーネスのダミーで行う。
 export function decideCell({
   lo = "", drop = "", shin = "", kei = "", today = TODAY,
@@ -385,9 +493,11 @@ export function decideCell({
 // ここに項目を足すと、この戻り値を丸ごと比べている既存の検証が「中身は同じなのに落ちる」ためである。
 // 画面が使う決定表の出力は buildCellModel が同じ decideCell から作る（＝規則の実装は1つのまま）。
 // ───────────────────────────────────────────────
+// cert は型式ラン × 法規行の配列（F-22）。このランのこの法規行の管理番号だけを読む
+// （同じ型式の別ランも、比較元の型式も読まない）。空白だけの番号は従来どおり「実績あり」（trimしない）。
 export const evalCellWith = (cert, run, r, sameness, today = TODAY) => {
   const applied = sameness==="同一" ? "継続車日" : sameness==="同一でない" ? "新型車日" : "";
-  const ck = cert[run.typeId]?.[r.id] || null;
+  const ck = findCert(cert, run.key, r.rid)?.ck || null;
   const { side, 根拠未確認 } = effectiveSideOf(run, sameness);
   const d = decideCell({
     lo: run.lo, drop: run.drop, shin: r.shin, kei: r.kei, today,
@@ -533,7 +643,7 @@ export const summarize = (runs, regs, cert, samenessFor) => {
 // 人の適用判断・理由メモ（decisions）
 //
 // 自動の日程判定（evalCellWith）・黄色の接近予告（approachingNoticeFor）・
-// 認証実績（cert[typeId][reg.id]）とは完全に別のデータとして持つ。
+// 認証実績（cert。型式ラン × 法規行）とは完全に別のデータとして持つ。
 // 判断の状態を予定・実績へ流用せず、判断が自動判定を上書きすることもない。
 //
 // 判断の単位＝「型式ラン × 法規行」。結合キーは run.key と reg.rid の2つ。
@@ -580,7 +690,7 @@ export function parentLinkOf(reg, regs) {
 //
 // 含める（同一性・適用可否に効く）：
 //   run … typeId / sk（新継） / lo / drop
-//   reg … id（法規ID。cert の参照キーでもある） / shin / kei / parent / 親の解決状態
+//   reg … id（法規ID） / shin / kei / parent / 親の解決状態
 // 含めない（表示名だけの変更）：
 //   run.gen（プロジェクト/世代）、reg.label（名称）
 // ※ 名称を変えて別プロジェクト・別法規へ行を流用する運用は想定しない（新規行を使う）。
@@ -976,7 +1086,7 @@ export function isBasisRoot(run, reg) {
 // 既存の判定式（evalCellWith）を、同一性を「同一でない」＝新型車側・「同一」＝継続車側に固定して2回呼び、
 // required（要か否か）だけを比べる。F-12のための判定式は作らない（二重管理をしないため）。
 // cert は status／認可書番号にしか効かず required には関与しないので、ここでは空の認可書実績で呼ぶ。
-const NO_CERT = Object.freeze({});
+const NO_CERT = Object.freeze([]);
 export function graceChangesNeed(run, reg) {
   const asShin = evalCellWith(NO_CERT, run, reg, "同一でない");
   const asKei = evalCellWith(NO_CERT, run, reg, "同一");
@@ -1107,8 +1217,8 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
       // 決定表（F-19）の出力。evalCell が載せてくる＝ここで判定をやり直さない。
       // 画面はこの1つの結果から描く：要否も黄色予告も4状態も生産フェーズも、すべてここから出る。
       // handover（引き継ぎ確認中）は、同じ型式の過去ランに実績があり当プロジェクトの番号が空、という状態。
-      // いまの認証実績は 型式 × 法規 で持っているのでこの2つを同時に表せず、評価関数は必ず false のままになる
-      // （実データで成立させるのは別F。F-19の未決事項）。表示の枝だけ先に用意しておく口である。
+      // 認証実績は F-22 で 型式ラン × 法規行 の器へ移したが、この状態を導出するのは F-23 の範囲で、
+      // 評価関数は必ず false のままにしてある（F-22 B2）。表示の枝だけ先に用意しておく口である。
       const decision = decideCell({
         lo: run.lo, drop: run.drop, shin: reg.shin, kei: reg.kei, today,
         certPlan: certPlanOf(auto.ck), handover: !!auto.handover,
@@ -1307,7 +1417,7 @@ export const nextKey = () => {
   return "r" + (++_id);
 };
 // サーバから読んだランのキー(r101など)と新規追加のキーがぶつからないよう底上げする
-// 法規行の内部キー（rid）。法規ID（id）は利用者が入力する表示・cert参照用の値であり、
+// 法規行の内部キー（rid）。法規ID（id）は利用者が入力する表示用の値であり、
 // 空や重複がありうるため、行の同一性には使えない。そこで機械が付ける rid を別に持つ。
 let _rid = 6;   // SEEDのregsが g1〜g6 を使っているため、その次から採番する
 export const nextRegKey = () => {
@@ -1375,13 +1485,52 @@ export const bumpIdFrom = (runs) => {
 // 実際に必要とされるもの（コード上の使用箇所から確認したもの）：
 //   run : key（更新・削除の識別子／nextKeyの採番元）, typeId, gen, sk, lo, drop
 //   reg : id（更新・削除の識別子）, label, shin, kei, parent
-//   cert: { [typeId]: { [regId]: 認可書番号(文字列) } } の2段の入れ子
+//   cert: 版なし（旧形式）… { [typeId]: { [regId]: 認可書番号(文字列) } } の2段の入れ子 → 読み込み時に移行する
+//         schemaVersion 2 … [{ runKey, rid, ck, planned }]（F-22。validateCertRecords を参照）
 //   key / id は行の同一性判定に使うため、重複していると更新・削除が誤動作する
 //
 // 空文字は許可する（編集で行を追加した直後は各欄が "" のため、正規の書き出しに含まれる）。
 // 業務ルール（日付の妥当性や必須入力など）はここでは判定しない。無言の補正もしない。
 // ───────────────────────────────────────────────
 const RUN_FIELDS = ["key", "typeId", "gen", "sk", "lo", "drop"];
+// 旧形式（版なし）の cert の形。問題があればエラー文、無ければ null。
+export function validateLegacyCert(cert) {
+  for (const [typeId, byReg] of Object.entries(cert)) {
+    if (!byReg || typeof byReg !== "object" || Array.isArray(byReg)) {
+      return `cert["${typeId}"] がオブジェクトではありません。`;
+    }
+    for (const [regId, ck] of Object.entries(byReg)) {
+      if (typeof ck !== "string") return `cert["${typeId}"]["${regId}"] が文字列ではありません。`;
+    }
+  }
+  return null;
+}
+// 版2の cert（型式ラン × 法規行のレコード配列）。問題があればエラー文、無ければ null。
+//   ・各レコードは { runKey, rid, ck, planned } の4項目だけ（書き出して読み直したとき完全一致させるため、未知の項目を持ち込まない）
+//   ・runKey / rid は存在する型式ラン・法規行を指す（孤立参照は勝手に修復せず拒否する。decisions と同じ）
+//   ・組 (runKey, rid) の重複は拒否する
+//   ・ck は文字列（空文字可・空白だけも可＝trimしない）、planned は真偽値
+const CERT_FIELDS = ["runKey", "rid", "ck", "planned"];
+export function validateCertRecords(cert, runKeys, regRids) {
+  const seenByRun = new Map();
+  for (let i = 0; i < cert.length; i++) {
+    const c = cert[i];
+    if (!c || typeof c !== "object" || Array.isArray(c)) return `cert[${i}] が認証実績オブジェクトではありません。`;
+    const extra = Object.keys(c).filter((k) => !CERT_FIELDS.includes(k));
+    if (extra.length) return `cert[${i}] に不明な項目があります（${extra.join(", ")}）。`;
+    if (typeof c.runKey !== "string" || c.runKey === "") return `cert[${i}].runKey が文字列ではありません。`;
+    if (typeof c.rid !== "string" || c.rid === "") return `cert[${i}].rid が文字列ではありません。`;
+    if (!runKeys.has(c.runKey)) return `cert[${i}] が存在しない型式ラン "${c.runKey}" を参照しています。`;
+    if (!regRids.has(c.rid)) return `cert[${i}] が存在しない法規行 "${c.rid}" を参照しています。`;
+    if (!seenByRun.has(c.runKey)) seenByRun.set(c.runKey, new Set());
+    if (seenByRun.get(c.runKey).has(c.rid)) return `cert に同じ型式ラン×法規行が重複しています（${c.runKey} × ${c.rid}）。`;
+    seenByRun.get(c.runKey).add(c.rid);
+    if (typeof c.ck !== "string") return `cert[${i}].ck が文字列ではありません。`;
+    if (typeof c.planned !== "boolean") return `cert[${i}].planned が真偽値ではありません。`;
+  }
+  return null;
+}
+
 const REG_FIELDS = ["id", "label", "shin", "kei", "parent"];
 // 画面の入力欄は文字列を書き込む。number等を無言で変換せず、文字列でなければ拒否する。
 const isStr = (v) => typeof v === "string";
@@ -1391,7 +1540,12 @@ export function parseImportedData(d) {
   if (!d || typeof d !== "object" || Array.isArray(d)) return err("JSONの中身がオブジェクトではありません。");
   if (!Array.isArray(d.runs)) return err("runs が配列ではありません。");
   if (!Array.isArray(d.regs)) return err("regs が配列ではありません。");
-  if (typeof d.cert !== "object" || d.cert === null || Array.isArray(d.cert)) return err("cert がオブジェクトではありません。");
+  // 保存データの版（F-22）。版が無ければ旧形式として読み、あとで cert を移行する。知らない版は読まない。
+  const legacy = d.schemaVersion === undefined;
+  if (!legacy && d.schemaVersion !== SCHEMA_VERSION) return err(`schemaVersion ${JSON.stringify(d.schemaVersion)} はこのアプリが読めない版です。`);
+  if (legacy) {
+    if (typeof d.cert !== "object" || d.cert === null || Array.isArray(d.cert)) return err("cert がオブジェクトではありません。");
+  } else if (!Array.isArray(d.cert)) return err("cert が配列ではありません。");
 
   // runs：行要素と必要な値の型、キーの重複
   const runKeys = new Set();
@@ -1439,14 +1593,20 @@ export function parseImportedData(d) {
     }
   }
 
-  // cert：2段の入れ子と、認可書番号が文字列であること
-  for (const [typeId, byReg] of Object.entries(d.cert)) {
-    if (!byReg || typeof byReg !== "object" || Array.isArray(byReg)) {
-      return err(`cert["${typeId}"] がオブジェクトではありません。`);
+  // cert
+  //   旧形式：2段の入れ子と、認可書番号が文字列であること（移行はあとで rid を補ってから行う）
+  //   版2  ：型式ラン × 法規行のレコード。decisions と同じく regs 全行に rid が必要
+  if (legacy) {
+    const bad = validateLegacyCert(d.cert);
+    if (bad) return err(bad);
+  } else {
+    for (let i = 0; i < d.regs.length; i++) {
+      if (d.regs[i].rid === undefined) {
+        return err(`schemaVersion 2 のデータでは regs[${i}].rid が必要です（内部キーを補番して認証実績をつなぎ直すことはしません）。`);
+      }
     }
-    for (const [regId, ck] of Object.entries(byReg)) {
-      if (!isStr(ck)) return err(`cert["${typeId}"]["${regId}"] が文字列ではありません。`);
-    }
+    const bad = validateCertRecords(d.cert, runKeys, regRids);
+    if (bad) return err(bad);
   }
 
   // decisions（人の適用判断）。
@@ -1611,14 +1771,40 @@ export function parseImportedData(d) {
   // 採番が動いてしまうことがない。反映は呼び出し側が applyImported で行う。
   const planned = planRegKeys(d.regs, peekIds().rid);
   if (!planned.ok) return err(planned.error);
+  // 旧形式の cert は、rid を補った法規行を使って型式ラン × 法規行へ移す（F-22 A4・A5）。
+  const cert = legacy ? migrateLegacyCert(d.cert, d.runs, planned.regs) : d.cert;
 
   return {
     ok: true,
-    // decisions / bases / sameness が無い旧形式は空配列（＝全件未確認・比較元未選択）。既存3領域は従来どおりそのまま返す。
-    data: { runs: d.runs, regs: planned.regs, cert: d.cert, decisions, bases, sameness },
+    // decisions / bases / sameness が無い旧形式は空配列（＝全件未確認・比較元未選択）。runs/regs は従来どおりそのまま返す。
+    // 返すデータは常に現行の版（旧形式は上で移行済み）なので、版番号を付けておく（そのまま書き出しても読み直せる形）。
+    data: { schemaVersion: SCHEMA_VERSION, runs: d.runs, regs: planned.regs, cert, decisions, bases, sameness },
     maxId,
     maxRid: planned.maxRid,
   };
+}
+
+// API版（サーバ保存版）の読込で cert を現行形式にそろえる（F-22）。
+// API版の読込は parseImportedData を通らない（runs/regs の受理条件は従来どおり緩い）ので、cert だけをここで検証・移行する。
+//   版なし … 旧形式の形を確かめ、rid を補った法規行（regs）を使って移行する
+//   版2   … レコードの形・参照先・重複を確かめ、そのまま使う
+// 戻り値：{ ok:true, cert } / { ok:false, error }
+export function certOfLoaded(d, regs) {
+  if (d.schemaVersion === undefined) {
+    if (typeof d.cert !== "object" || d.cert === null || Array.isArray(d.cert)) return { ok: false, error: "cert がオブジェクトではありません。" };
+    const bad = validateLegacyCert(d.cert);
+    if (bad) return { ok: false, error: bad };
+    return { ok: true, cert: migrateLegacyCert(d.cert, d.runs, regs) };
+  }
+  if (d.schemaVersion !== SCHEMA_VERSION) return { ok: false, error: `schemaVersion ${JSON.stringify(d.schemaVersion)} はこのアプリが読めない版です。` };
+  if (!Array.isArray(d.cert)) return { ok: false, error: "cert が配列ではありません。" };
+  // 版2では法規行の全行に rid が要る（単体版の parseImportedData と同じ）。補番した rid で検証すると、
+  // 元のデータでは結び付いていなかった実績が補番された法規行へ結び付いてしまう（Codexレビュー指摘2）。
+  const noRid = d.regs.findIndex((r) => r?.rid === undefined);
+  if (noRid !== -1) return { ok: false, error: `schemaVersion 2 のデータでは regs[${noRid}].rid が必要です（内部キーを補番して認証実績をつなぎ直すことはしません）。` };
+  const bad = validateCertRecords(d.cert, new Set(d.runs.map((r) => r?.key)), new Set(regs.map((r) => r?.rid)));
+  if (bad) return { ok: false, error: bad };
+  return { ok: true, cert: d.cert };
 }
 
 // parseImportedData が確定させた採番情報を、置換が確定したあとに反映する。
@@ -1830,13 +2016,18 @@ export default function IListApp() {
       .then((d) => {
         if (cancelled) return;
         if (!isValidData(d)) throw new Error("不正な応答形式です");
-        if (d.runs.length || d.regs.length || Object.keys(d.cert).length) {
-          // 法規行の内部キー(rid)はサーバ側の既存データ（SQLがridを返さない形）には無いので補う。
+        // 版2の応答は「一度保存されたデータ」なので、空でもそのまま使う（全件削除して保存した空をSEEDへ戻さない。Codexレビュー指摘3）。
+        // 版なしで空の応答は未初期化のDBなので、従来どおりSEEDのまま（直後の自動保存でSEEDが入る）。
+        if (d.schemaVersion === SCHEMA_VERSION || d.runs.length || d.regs.length || Object.keys(d.cert).length) {
+          // 法規行の内部キー(rid)は旧形式のサーバDB（SQLがridを返さない形）には無いので補う。
           // 受理条件は変えず、値の削除・統合・改名もしない（付け足すだけ）。
           // 補完は共有カウンタを変えない planRegKeys で行い、反映時にまとめて採番を進める。
           const planned = planRegKeys(d.regs, peekIds().rid);
           if (!planned.ok) throw new Error(planned.error);
-          setRuns(d.runs); setRegs(planned.regs); setCert(d.cert);
+          // 旧形式のDBなら cert をここで型式ラン × 法規行へ移す。直後の自動保存で版2としてDBへ書き戻される（F-22 A4）。
+          const c = certOfLoaded(d, planned.regs);
+          if (!c.ok) throw new Error(c.error);
+          setRuns(d.runs); setRegs(planned.regs); setCert(c.cert);
           bumpIdFrom(d.runs);
           applyImported({ maxRid: planned.maxRid });
         }
@@ -1862,7 +2053,7 @@ export default function IListApp() {
       fetch("/api/data", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ runs, regs, cert }),
+        body: JSON.stringify({ schemaVersion: SCHEMA_VERSION, runs, regs, cert }),
       })
         .then((r) => {
           if (!r.ok) throw new Error();
@@ -1881,12 +2072,15 @@ export default function IListApp() {
 
   // ── JSON 書き出し/読み込み ──
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify({ runs, regs, cert }, null, 2)], { type:"application/json" });
+    const blob = new Blob([JSON.stringify({ schemaVersion: SCHEMA_VERSION, runs, regs, cert }, null, 2)], { type:"application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = `ilist_data_${new Date().toISOString().slice(0,10)}.json`;
     a.click(); URL.revokeObjectURL(url);
   };
+  // 行の削除と同じ操作で、その行を参照する認証実績も取り除く（F-22 A7）
+  const handleDeleteRun = (runKey) => setCert((c) => pruneCertByRun(c, runKey));
+  const handleDeleteReg = (rid) => setCert((c) => pruneCertByReg(c, rid));
   const importJSON = (e) => {
     const file = e.target.files?.[0]; if (!file) return;
     const reader = new FileReader();
@@ -1916,7 +2110,10 @@ export default function IListApp() {
           // 法規行の内部キーを補う（受理条件は変えない）。共有カウンタは反映時にだけ進める。
           const planned = planRegKeys(d.regs, peekIds().rid);
           if (!planned.ok) { alert(planned.error); return; }
-          setRuns(d.runs); setRegs(planned.regs); setCert(d.cert);
+          // 旧形式（版なし）なら型式ラン × 法規行へ移す。読めない版・壊れた cert は state を変えずに中止する（F-22 A4）。
+          const c = certOfLoaded(d, planned.regs);
+          if (!c.ok) { alert(`このファイルは読み込めません。\n${c.error}\n\n（現在のデータは変更していません）`); return; }
+          setRuns(d.runs); setRegs(planned.regs); setCert(c.cert);
           applyImported({ maxRid: planned.maxRid });
         }
         else alert("形式が違います。runs / regs / cert を含むファイルを選んでください。");
@@ -1959,9 +2156,9 @@ export default function IListApp() {
         </div>
 
         {tab==="帳票" && <MatrixView {...{runs,regs,evalCell,summary,colorOf}} />}
-        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey}} />}
-        {tab==="法規DB" && <RegsEditor {...{regs,setRegs}} />}
-        {tab==="認可書実績" && <CertEditor {...{typeIds,regs,cert,setCert,colorOf,evalCell,runs}} />}
+        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey}} onDeleteRun={handleDeleteRun} />}
+        {tab==="法規DB" && <RegsEditor {...{regs,setRegs}} onDeleteReg={handleDeleteReg} />}
+        {tab==="認可書実績" && <CertEditor {...{runs,regs,cert,setCert,colorOf}} />}
       </div>
     </div>
   );
@@ -2317,7 +2514,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
           </tr></thead>
           <tbody>
             {/* React行キーは rid を使う。法規IDは空・重複がありうるため行の対応が崩れる。
-                cert の参照先は従来どおり法規ID(r.id)のまま（参照モデルは変えない）。 */}
+                認証実績も rid（と run.key）で引く（F-22）。 */}
             {regs.map(r=>(
               <tr key={r.rid}>
                 <td style={{ padding:"4px 8px", verticalAlign:"top", borderLeft:r.parent?`2px solid ${MUTE}`:"none" }}>
@@ -2935,43 +3132,45 @@ export function RegsEditor({ regs, setRegs, onDeleteReg }) {
   );
 }
 
-// ===== 認可書実績編集（型式 × 法規 グリッド）=====
-export function CertEditor({ typeIds, regs, cert, setCert, colorOf }) {
-  const set=(typeId,regId,val)=>setCert(c=>{
-    const next={...c, [typeId]:{...(c[typeId]||{})}};
-    if (val) next[typeId][regId]=val; else delete next[typeId][regId];
-    return next;
-  });
-  if (typeIds.length===0 || regs.length===0)
-    return <Empty msg="型式ランと法規を入力すると、ここで認可書番号を型式×法規で入力できます。" />;
+// ===== 認可書実績編集（型式ラン × 法規行 グリッド・F-22 A6）=====
+// 列＝型式ラン（型式・プロジェクトコード・新継）、行＝法規行。1マス＝このランのこの法規の管理番号1つ。
+// 同じ型式でもランごとに別の欄になる（型式で共有しない）。取得予定の入力はまだ出さない（F-23）。
+export function CertEditor({ runs, regs, cert, setCert, colorOf }) {
+  const set=(runKey,rid,val)=>setCert(c=>setCertNumber(c,runKey,rid,val));
+  if (runs.length===0 || regs.length===0)
+    return <Empty msg="型式ランと法規を入力すると、ここで認可書番号を型式ラン×法規で入力できます。" />;
   return (
     <div>
       <p style={{ color:MUTE, fontSize:12, lineHeight:1.7, margin:"0 0 4px" }}>
-        指定装置一覧＝認可書実績の入力。型式 × 法規に認可書番号を入れる（継続ランは型式の実績を共有）。空欄＝実績なし。
+        指定装置一覧＝認可書実績の入力。型式ラン × 法規に認可書番号を入れる（同じ型式でもランごとに別の欄）。空欄＝実績なし。
       </p>
       <p style={{ color:"#6b7d90", fontSize:10.5, margin:"0 0 14px" }}>※段階2では、この欄を指定装置一覧ファイルから自動で埋める設計（次の相談）。</p>
       <div style={{ background:PANEL, borderRadius:12, padding:14, border:`1px solid ${LINE}`, overflowX:"auto" }}>
         <table style={{ borderCollapse:"separate", borderSpacing:5, width:"100%" }}>
           <thead><tr>
-            <th style={{ textAlign:"left", padding:"4px 8px", fontSize:10.5, color:MUTE }}>法規 \ 型式</th>
-            {typeIds.map(t=>(
-              <th key={t} style={{ padding:"4px 6px", minWidth:150 }}>
+            <th style={{ textAlign:"left", padding:"4px 8px", fontSize:10.5, color:MUTE }}>法規 \ 型式ラン</th>
+            {runs.map(run=>(
+              <th key={run.key} style={{ padding:"4px 6px", minWidth:150 }}>
                 <span style={{ display:"inline-flex", alignItems:"center", gap:4 }}>
-                  <span style={{ width:7,height:7,borderRadius:2,background:colorOf(t) }}/>
-                  <span style={{ fontFamily:"ui-monospace,monospace", fontSize:12.5, color:"#eef4fa", fontWeight:700 }}>{t}</span>
+                  <span style={{ width:7,height:7,borderRadius:2,background:colorOf(run.typeId) }}/>
+                  <span style={{ fontFamily:"ui-monospace,monospace", fontSize:12.5, color:"#eef4fa", fontWeight:700 }}>{run.typeId}</span>
                 </span>
+                <div style={{ fontSize:9.5, color:MUTE, fontWeight:500, marginTop:2 }}>{run.gen || "—"}・{run.sk}</div>
               </th>))}
           </tr></thead>
           <tbody>
-            {/* React行キーは rid（cert の参照先は r.id のまま） */}
+            {/* 行キーは rid、列キーは run.key（認証実績の結合キーそのもの） */}
             {regs.map(r=>(
               <tr key={r.rid}>
                 <td style={{ padding:"4px 8px" }}><span style={{ fontSize:12, color:"#eef4fa", fontWeight:600 }}>{r.id}</span></td>
-                {typeIds.map(t=>(
-                  <td key={t} style={{ padding:0 }}>
-                    <input value={cert[t]?.[r.id]||""} placeholder="認可書番号" onChange={e=>set(t,r.id,e.target.value)}
-                      style={{ width:"100%", background:cert[t]?.[r.id]?"rgba(63,191,143,0.08)":"transparent", border:`1px solid ${cert[t]?.[r.id]?GREEN:LINE}`, borderRadius:6, color:"#bfe9d8", fontSize:10, fontFamily:"ui-monospace,monospace", padding:"7px 8px", boxSizing:"border-box" }}/>
-                  </td>))}
+                {runs.map(run=>{
+                  const ck = findCert(cert, run.key, r.rid)?.ck || "";
+                  return (
+                  <td key={run.key} style={{ padding:0 }}>
+                    <input value={ck} placeholder="認可書番号" aria-label={`認可書番号 ${run.key} ${r.rid}`} onChange={e=>set(run.key,r.rid,e.target.value)}
+                      style={{ width:"100%", background:ck?"rgba(63,191,143,0.08)":"transparent", border:`1px solid ${ck?GREEN:LINE}`, borderRadius:6, color:"#bfe9d8", fontSize:10, fontFamily:"ui-monospace,monospace", padding:"7px 8px", boxSizing:"border-box" }}/>
+                  </td>);
+                })}
               </tr>
             ))}
           </tbody>

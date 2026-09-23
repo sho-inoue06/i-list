@@ -19,6 +19,7 @@ import {
   pruneDecisionsByRun, pruneDecisionsByReg,
   setBase, sweepSameness, upsertSameness, normalizeSameness, makeSamenessContext, makeBasisContext,
   pruneBasesByRun, pruneSamenessByRun, pruneSamenessByReg,
+  SCHEMA_VERSION, pruneCertByRun, pruneCertByReg,
   INK, PALETTE, btn,
 } from "../src/IListApp.jsx";
 
@@ -145,12 +146,15 @@ export default function StandaloneApp({ bootData } = {}) {
   // ランの見出しからの手動要再確認（装備変更など自動検知できない条件のため）。
   const handleRecheckRun = (runKey) => setDecisions((ds) => markRunNeedsRecheck(ds, runKey));
   // 行削除と同じ操作で、その行を参照する判断だけを取り除く（孤立参照を作らない）。
+  // 認証実績も型式ラン × 法規行で持つので、同じ操作で取り除く（F-22 A7）。
   const handleDeleteRun = (runKey) => {
+    setCert((c) => pruneCertByRun(c, runKey));
     setDecisions((ds) => pruneDecisionsByRun(ds, runKey));
     setBases((bs) => pruneBasesByRun(bs, runKey));
     setSameness((ss) => pruneSamenessByRun(ss, runKey));
   };
   const handleDeleteReg = (rid) => {
+    setCert((c) => pruneCertByReg(c, rid));
     setDecisions((ds) => pruneDecisionsByReg(ds, rid));
     setSameness((ss) => pruneSamenessByReg(ss, rid));
   };
@@ -162,7 +166,8 @@ export default function StandaloneApp({ bootData } = {}) {
   // 掃き出しEffectの反映を待たずに済むよう、ここでも同じ sweepRecheck を通してから書き出す
   // （純関数なので結果は同じ。Effectより先に保存ボタンが押されても古いフラグを書き出さない）。
   // 情報を持たない未確認レコードは落とす（レコード無し＝未確認と同義）。
-  const snapshot = () => ({ runs, regs, cert, decisions: normalizeDecisions(sweepRecheck(decisions, runs, regs)),
+  // 保存データの版（F-22）を先頭に付ける。旧形式（版なし）は読み込み時に移行済みなので、書き出しは常に版2になる。
+  const snapshot = () => ({ schemaVersion: SCHEMA_VERSION, runs, regs, cert, decisions: normalizeDecisions(sweepRecheck(decisions, runs, regs)),
     bases, sameness: normalizeSameness(sweepSameness(sameness, runs, regs, bases)) });
 
   // 未書き出しのまま閉じようとしたら警告する。
@@ -354,7 +359,7 @@ export default function StandaloneApp({ bootData } = {}) {
           sameCtx={sameCtx} onSaveSameness={handleSaveSameness} basisCtx={basisCtx} />}
         {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey,bases}} onDeleteRun={handleDeleteRun} onSetBase={handleSetBase} />}
         {tab==="法規DB" && <RegsEditor {...{regs,setRegs}} onDeleteReg={handleDeleteReg} />}
-        {tab==="認可書実績" && <CertEditor {...{typeIds,regs,cert,setCert,colorOf,evalCell,runs}} />}
+        {tab==="認可書実績" && <CertEditor {...{runs,regs,cert,setCert,colorOf}} />}
       </div>
     </div>
   );
