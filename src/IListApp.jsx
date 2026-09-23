@@ -196,33 +196,6 @@ export const pruneCertByReg = (cert, rid) => {
   return list.some((c) => c.rid === rid) ? list.filter((c) => c.rid !== rid) : list;
 };
 
-// 新しく追加した型式ランの認証実績を、同じ型式の既存ランから1回だけ写す（F-22 A9・B7・B8）。
-// F-22より前は同じ型式のランが1つの実績を共有していたので、型式を入れた瞬間から実績ありに見えた。
-// その見え方を保つため、追加したランの型式が確定した時（型式欄から離れた時）に呼ぶ。
-//   ・複製元は **同じ型式（typeId）の他のラン** のうち LO が最も新しいもの（Ext後の番号を持っている可能性が最も高い）。
-//     LO が読めないランは最も古い扱い。LO が同じなら並びの後ろ（後から足した行）を採る。
-//     比較元（別の型式）は見ない（B8・決定B）。
-//   ・写すのは番号のあるレコードだけ（番号が空のレコードは「番号なし」と同じなので写さない）。取得予定は写さず false。
-//   ・そのランがすでに実績を1件でも持っていれば何もしない（人が入れた番号を上書きしない）。
-//   ・型式が空、または同じ型式の他のランが無ければ何もしない（空で始まる）。
-// 変化が無ければ同じ配列を返す。
-export function seedCertForNewRun(cert, runs, runKey) {
-  const list = Array.isArray(cert) ? cert : [];
-  const run = (runs || []).find((r) => r.key === runKey);
-  if (!run || run.typeId === "") return list;
-  if (list.some((c) => c.runKey === runKey)) return list;
-  let src = null, srcLo = null;
-  for (const r of runs) {
-    if (r.key === runKey || r.typeId !== run.typeId) continue;
-    const lo = dateDayNumber(r.lo) ?? -Infinity;
-    if (src === null || lo >= srcLo) { src = r; srcLo = lo; }
-  }
-  if (!src) return list;
-  const copied = list.filter((c) => c.runKey === src.key && c.ck !== "")
-    .map((c) => ({ runKey, rid: c.rid, ck: c.ck, planned: false }));
-  return copied.length ? [...list, ...copied] : list;
-}
-
 // ダミーデータ（架空の型式・法規・認可書番号。実車・実データとは無関係）
 //
 // 日付はすべて seedDate（今日からの相対日数）で作る。括弧内の数字は「今日から何日」。
@@ -2024,18 +1997,6 @@ export default function IListApp() {
   const setRegs = (v) => { bumpGen(); _setRegs(v); };
   const setCert = (v) => { bumpGen(); _setCert(v); };
   const fileRef = useRef(null);
-  // この画面で「ランを追加」した型式ランのキー（F-22 A9）。型式を確定した時に1回だけ認証実績を写し、写したら外す。
-  // 一時的なUI状態で、保存しない（読み込みで別データに替わったら空にする）。
-  const newRunKeys = useRef(new Set());
-  const handleAddRun = (key) => { newRunKeys.current.add(key); };
-  const handleRunTypeCommitted = (runKey, runsNow) => {
-    if (!newRunKeys.current.has(runKey)) return;
-    const run = runsNow.find((r) => r.key === runKey);
-    if (!run || run.typeId === "") return;         // 型式がまだ空なら、確定するまで待つ
-    newRunKeys.current.delete(runKey);             // 1回だけ（同じ型式が無くても、ここで終わり＝空で始まる）
-    const next = seedCertForNewRun(cert, runsNow, runKey);
-    if (next !== cert) setCert(next);
-  };
   // loaded: 初回読込が「成功」した後にのみ true にする（保存を許可するフラグ）
   // 通信失敗・HTTPエラー・不正な応答（runs/regs/certが揃っていない）は失敗として扱い、loadedをtrueにしない
   const [loaded, setLoaded] = useState(false);
@@ -2112,7 +2073,7 @@ export default function IListApp() {
     a.click(); URL.revokeObjectURL(url);
   };
   // 行の削除と同じ操作で、その行を参照する認証実績も取り除く（F-22 A7）
-  const handleDeleteRun = (runKey) => { newRunKeys.current.delete(runKey); setCert((c) => pruneCertByRun(c, runKey)); };
+  const handleDeleteRun = (runKey) => setCert((c) => pruneCertByRun(c, runKey));
   const handleDeleteReg = (rid) => setCert((c) => pruneCertByReg(c, rid));
   const importJSON = (e) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -2146,7 +2107,6 @@ export default function IListApp() {
           // 旧形式（版なし）なら型式ラン × 法規行へ移す。読めない版・壊れた cert は state を変えずに中止する（F-22 A4）。
           const c = certOfLoaded(d, planned.regs);
           if (!c.ok) { alert(`このファイルは読み込めません。\n${c.error}\n\n（現在のデータは変更していません）`); return; }
-          newRunKeys.current.clear();
           setRuns(d.runs); setRegs(planned.regs); setCert(c.cert);
           applyImported({ maxRid: planned.maxRid });
         }
@@ -2190,8 +2150,7 @@ export default function IListApp() {
         </div>
 
         {tab==="帳票" && <MatrixView {...{runs,regs,evalCell,summary,colorOf}} />}
-        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey}} onDeleteRun={handleDeleteRun}
-          onAddRun={handleAddRun} onRunTypeCommitted={handleRunTypeCommitted} />}
+        {tab==="型式ラン" && <RunsEditor {...{runs,setRuns,colorOf,nextKey}} onDeleteRun={handleDeleteRun} />}
         {tab==="法規DB" && <RegsEditor {...{regs,setRegs}} onDeleteReg={handleDeleteReg} />}
         {tab==="認可書実績" && <CertEditor {...{runs,regs,cert,setCert,colorOf}} />}
       </div>
@@ -3067,9 +3026,7 @@ function DecisionEditor({ run, reg, regs, dec, auto, notice, onSave, onCancel, d
 // onDeleteRun は省略可能。渡された場合、行の削除と同じ操作でその行を参照する判断も取り除く
 // （参照整合性のため。既存の削除手順そのものは変えていない）。
 // bases / onSetBase は省略可能（F-04・単体版のみ）。渡されたときだけ「比較元」列を出す。
-// onAddRun(key) / onRunTypeCommitted(key, runs) は省略可能（F-22 A9）。行を追加したこと・型式欄から離れたこと
-// （型式の入力を確定したこと）を知らせるだけで、認証実績の複製をするかどうかは呼び出し側が決める。
-export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun, bases, onSetBase, onAddRun, onRunTypeCommitted }) {
+export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun, bases, onSetBase }) {
   const withBase = Array.isArray(bases) && !!onSetBase;
   const up=(key,field,val)=>setRuns(rs=>rs.map(r=>r.key===key?{...r,[field]:val}:r));
   // キーの確保は updater の外で行う。
@@ -3080,7 +3037,6 @@ export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun, bases
     try { key = nextKey(); }
     catch (e) { alert(e.message); return; }   // 上限到達：データも採番も変えずに知らせる
     setRuns(rs=>[...rs,{key,typeId:"",gen:"",sk:"新",lo:"",drop:""}]);
-    onAddRun?.(key);
   };
   // 行の削除と、その行を参照する判断の削除は同じ操作で行う（同一イベント内でまとめて反映される）
   const del=(key)=>{ setRuns(rs=>rs.filter(r=>r.key!==key)); onDeleteRun?.(key); };
@@ -3093,7 +3049,7 @@ export function RunsEditor({ runs, setRuns, colorOf, nextKey, onDeleteRun, bases
             <tr key={r.key}>
               <td style={td}><div style={{ display:"flex", alignItems:"center", gap:5 }}>
                 <span style={{ width:8,height:8,borderRadius:2,background:colorOf(r.typeId) }}/>
-                <input value={r.typeId} placeholder="DEMO-0001" onChange={e=>up(r.key,"typeId",e.target.value)} onBlur={()=>onRunTypeCommitted?.(r.key, runs)} style={{...inp, fontFamily:"ui-monospace,monospace", width:120}}/>
+                <input value={r.typeId} placeholder="DEMO-0001" onChange={e=>up(r.key,"typeId",e.target.value)} style={{...inp, fontFamily:"ui-monospace,monospace", width:120}}/>
               </div></td>
               <td style={td}><input value={r.gen} placeholder="000A" onChange={e=>up(r.key,"gen",e.target.value)} style={inp}/></td>
               <td style={td}><select value={r.sk} onChange={e=>up(r.key,"sk",e.target.value)} style={{...inp, width:64}}><option value="新">新型</option><option value="継">継続</option></select></td>

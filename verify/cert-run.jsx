@@ -9,7 +9,7 @@
 //   node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
 //   → http://127.0.0.1:5173/verify/cert-run.html
 //
-// 完成条件 A1〜A9・B1〜B8（Notion「Iリスト｜バックログ」F-22）を、ケースIDの先頭で対応づける。
+// 完成条件 A1〜A8・B1〜B6（Notion「Iリスト｜バックログ」F-22）を、ケースIDの先頭で対応づける。
 // A8（既存ハーネスの全PASS）はこのページの対象外（各ハーネスで確かめる）。
 // ───────────────────────────────────────────────
 import React, { useState, useEffect } from "react";
@@ -18,7 +18,7 @@ import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
   SEED, parseImportedData, replaceBootData, readBootData, isValidData,
   evalCellWith, decideCell, effectiveSideOf, certPlanOf, summarize, buildCellModel, riskRunRows,
-  makeSamenessContext, migrateLegacyCert, findCert, setCertNumber, pruneCertByRun, pruneCertByReg, seedCertForNewRun,
+  makeSamenessContext, migrateLegacyCert, findCert, setCertNumber, pruneCertByRun, pruneCertByReg,
   SCHEMA_VERSION, TODAY,
 } from "../src/IListApp.jsx";
 
@@ -165,58 +165,6 @@ async function mountWith(mount, data = V2) {
   await sleep(80);
   return app.container;
 }
-// 欄から離れる（React の onBlur は focusout で届く）。ヘッドレス実行ではウィンドウにフォーカスが無く
-// focus()/blur() ではイベントが起きないことがあるため、focusout を直接送る。
-const leave = async (el) => { el.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); await sleep(30); };
-// 型式ランタブで「ランを追加」し、追加した行（最後の行）の各欄を入れる。型式は最後に入れて欄から離れる（＝確定）。
-//   fields … { gen, lo, drop }（省略可）。typeId=null なら型式は入れない。blur=false なら型式欄から離れない。
-async function addRun(c, typeId, fields = {}, { blur = true } = {}) {
-  await openTab(c, "型式ラン");
-  await clickByText(c, /ランを追加/);
-  const tr = [...c.querySelectorAll("table tbody tr")].at(-1);
-  const [typeIn, genIn] = tr.querySelectorAll("input");
-  const dates = tr.querySelectorAll('input[type="date"]');
-  if (fields.gen !== undefined) { setNativeValue(genIn, fields.gen); await sleep(10); }
-  if (fields.lo !== undefined) { setNativeValue(dates[0], fields.lo); await sleep(10); }
-  if (fields.drop !== undefined) { setNativeValue(dates[1], fields.drop); await sleep(10); }
-  if (typeId !== null) {
-    setNativeValue(typeIn, typeId);
-    await sleep(20);
-    if (blur) await leave(typeIn);
-  }
-  return tr;
-}
-// 型式ランタブの i 行目の型式欄を書き換えて欄から離れる
-async function retypeRun(c, index, typeId) {
-  await openTab(c, "型式ラン");
-  const typeIn = c.querySelectorAll("table tbody tr")[index].querySelector("input");
-  setNativeValue(typeIn, typeId);
-  await sleep(20);
-  await leave(typeIn);
-}
-const certOfRun = (cert, runKey) => cert.filter((x) => x.runKey === runKey).map((x) => [x.rid, x.ck, x.planned]);
-
-// A9のダミー：同じ型式 CR-A に LO の違う2ラン（r852 が新しい）、同じプロジェクトの別型式 CR-B（LO はいちばん新しい）
-const A9DATA = {
-  schemaVersion: 2,
-  runs: [
-    { key: "r851", typeId: "CR-A", gen: "PJ-1", sk: "新", lo: "2021-01-01", drop: "2030-12-31" },
-    { key: "r852", typeId: "CR-A", gen: "PJ-2", sk: "継", lo: "2024-01-01", drop: "2031-12-31" },
-    { key: "r853", typeId: "CR-B", gen: "PJ-2", sk: "新", lo: "2025-01-01", drop: "2031-12-31" },
-  ],
-  regs: V2.regs,
-  cert: [
-    { runKey: "r851", rid: "g801", ck: "A*OLD", planned: false },
-    { runKey: "r851", rid: "g802", ck: "A*OLD2", planned: false },
-    { runKey: "r852", rid: "g801", ck: "A*EXT", planned: false },
-    { runKey: "r852", rid: "g803", ck: " ", planned: false },
-    { runKey: "r852", rid: "g802", ck: "", planned: true },
-    { runKey: "r853", rid: "g802", ck: "B*1", planned: false },
-    { runKey: "r853", rid: "g803", ck: "B*3", planned: false },
-  ],
-  decisions: [], bases: [], sameness: [],
-};
-
 // 型式ランタブ・法規DBタブの行を消す（行の最後のボタン＝ゴミ箱）
 async function deleteRow(c, tab, index) {
   await openTab(c, tab);
@@ -599,138 +547,6 @@ const SCENARIOS = [
         const last = m.puts[m.puts.length - 1];
         asserts.check("API版：削除した行の実績はPUTに残らない", last?.cert, API_V2.cert.filter((x) => x.runKey !== "r801" && x.rid !== "g803"));
       } finally { m.restore(); }
-    },
-  },
-  {
-    id: "A9-copy-on-add",
-    name: "型式ランを追加すると、同じ型式でLOが最も新しいランから管理番号を1回だけ写して始まる",
-    expect: "型式を確定した時に r852（LO最新）の番号だけを写す（空の番号・予定は写さず予定なし）。以後は独立。同じ型式が無ければ空。型式が空のうちは写さない",
-    async run({ mount, mountApi, asserts }) {
-      // 純関数
-      const runsP = [...A9DATA.runs, { key: "rN", typeId: "CR-A", gen: "PJ-3", sk: "継", lo: "", drop: "" }];
-      asserts.check("純関数：LO最新の同型式ランから・番号のあるものだけ・予定なし",
-        certOfRun(seedCertForNewRun(A9DATA.cert, runsP, "rN"), "rN"), [["g801", "A*EXT", false], ["g803", " ", false]]);
-      const tie = [{ key: "t1", typeId: "T", lo: "2024-01-01" }, { key: "t2", typeId: "T", lo: "2024-01-01" }, { key: "tN", typeId: "T", lo: "" }];
-      asserts.check("純関数：LOが同じなら並びの後ろ", certOfRun(seedCertForNewRun([{ runKey: "t1", rid: "g1", ck: "X1", planned: false },
-        { runKey: "t2", rid: "g1", ck: "X2", planned: false }], tie, "tN"), "tN"), [["g1", "X2", false]]);
-      const bad = [{ key: "b1", typeId: "T", lo: "" }, { key: "b2", typeId: "T", lo: "2020-01-01" }, { key: "bN", typeId: "T", lo: "" }];
-      asserts.check("純関数：LOが読めないランは最も古い扱い", certOfRun(seedCertForNewRun([{ runKey: "b1", rid: "g1", ck: "B1", planned: false },
-        { runKey: "b2", rid: "g1", ck: "B2", planned: false }], bad, "bN"), "bN"), [["g1", "B2", false]]);
-      const own = [...A9DATA.cert, { runKey: "rN", rid: "g802", ck: "MINE", planned: false }];
-      asserts.checkTrue("純関数：すでに実績を持つランには写さない（同じ配列）", seedCertForNewRun(own, runsP, "rN") === own);
-
-      // 単体版：追加 → 型式を確定
-      const c = await mountWith(mount, A9DATA);
-      const tr = await addRun(c, "CR-A", { gen: "PJ-3" }, { blur: false });
-      let snap = await snapshotAll(c);
-      const newKey = snap.runs.at(-1).key;
-      asserts.check("型式欄から離れるまでは写さない", certOfRun(snap.cert, newKey), []);
-      const typeIn = tr.querySelector("input");
-      await leave(typeIn);
-      snap = await snapshotAll(c);
-      asserts.check("確定するとLO最新（r852）から写す", certOfRun(snap.cert, newKey), [["g801", "A*EXT", false], ["g803", " ", false]]);
-      asserts.check("元のランは変わらない", snap.cert.filter((x) => x.runKey !== newKey), A9DATA.cert);
-      // 以後は独立
-      await openTab(c, "認可書実績");
-      setNativeValue(certInput(c, newKey, "g801"), "A*NEW"); await sleep(20);
-      setNativeValue(certInput(c, "r852", "g803"), "A*R852"); await sleep(20);
-      snap = await snapshotAll(c);
-      asserts.check("新しいランを直しても元は変わらない", findCert(snap.cert, "r852", "g801").ck, "A*EXT");
-      asserts.check("元を直しても新しいランは変わらない", findCert(snap.cert, newKey, "g803").ck, " ");
-      // 1回だけ：型式を変えて離れても、もう写さない（番号は付いてくる＝A7）
-      await retypeRun(c, 3, "CR-B");
-      snap = await snapshotAll(c);
-      asserts.check("2回目の確定では写さない", certOfRun(snap.cert, newKey), [["g801", "A*NEW", false], ["g803", " ", false]]);
-      // 空のまま離れる → 待つ。あとで型式を入れて離れると写す
-      const tr2 = await addRun(c, null);
-      const typeIn2 = tr2.querySelector("input");
-      await leave(typeIn2);
-      await retypeRun(c, 4, "CR-A");
-      snap = await snapshotAll(c);
-      asserts.check("型式が空のうちは待ち、入れて離れた時に写す", certOfRun(snap.cert, snap.runs[4].key), [["g801", "A*EXT", false], ["g803", "A*R852", false]]);
-      // 同じ型式が無い → 空で始まる
-      await addRun(c, "CR-NEW");
-      snap = await snapshotAll(c);
-      asserts.check("同じ型式が無ければ空", certOfRun(snap.cert, snap.runs[5].key), []);
-      // 既存ラン（追加したものではない）の型式を変えても写さない
-      await retypeRun(c, 2, "CR-A");
-      snap = await snapshotAll(c);
-      asserts.check("既存ランの型式変更では写さない", certOfRun(snap.cert, "r853"), [["g802", "B*1", false], ["g803", "B*3", false]]);
-      asserts.check("書き出しを読み直せる", parseImportedData(clone(snap)).ok, true);
-
-      // API版も同じ
-      const m = installApiMock({ schemaVersion: 2, runs: A9DATA.runs, regs: A9DATA.regs, cert: A9DATA.cert });
-      try {
-        const a = mountApi().container;
-        await sleep(300); await sleep(WAIT_PAST_DEBOUNCE);
-        await addRun(a, "CR-A");
-        await sleep(WAIT_PAST_DEBOUNCE);
-        const last = m.puts[m.puts.length - 1];
-        const k = last?.runs.at(-1).key;
-        asserts.check("API版：追加して型式を確定すると写してPUT", last ? certOfRun(last.cert, k) : null, [["g801", "A*EXT", false], ["g803", " ", false]]);
-      } finally { m.restore(); }
-    },
-  },
-  {
-    id: "B8-same-type-only",
-    name: "複製元は同じ型式のランだけ。比較元（別の型式）からは写さない",
-    expect: "同じプロジェクトにLOのもっと新しい別型式（CR-B）があっても写さない。別型式しか無い型式では空。比較元を選んでも写さない",
-    async run({ mount, asserts }) {
-      const runsP = [...A9DATA.runs, { key: "rN", typeId: "CR-A", gen: "PJ-2", sk: "新", lo: "2026-01-01", drop: "" }];
-      asserts.checkTrue("純関数：写したものに別型式（r853）の番号が無い",
-        !seedCertForNewRun(A9DATA.cert, runsP, "rN").some((x) => x.runKey === "rN" && x.ck.startsWith("B*")));
-      const onlyOther = [...A9DATA.runs, { key: "rC", typeId: "CR-C", gen: "PJ-2", sk: "新", lo: "", drop: "" }];
-      asserts.check("純関数：別型式しか無ければ空", certOfRun(seedCertForNewRun(A9DATA.cert, onlyOther, "rC"), "rC"), []);
-      // 画面：別型式のランを追加し、同じプロジェクトの CR-B を比較元に選ぶ
-      const c = await mountWith(mount, A9DATA);
-      await addRun(c, "CR-C", { gen: "PJ-2" });
-      await openTab(c, "型式ラン");
-      const sel = [...c.querySelectorAll('select[aria-label="比較元"]')].at(-1);
-      setNativeValue(sel, "r853"); await sleep(30);
-      const snap = await snapshotAll(c);
-      const k = snap.runs.at(-1).key;
-      asserts.check("比較元は選べている", snap.bases.map((b) => [b.runKey, b.baseRunKey]), [[k, "r853"]]);
-      asserts.check("比較元の番号は写さない", certOfRun(snap.cert, k), []);
-    },
-  },
-  {
-    id: "B7-add-same-as-before",
-    name: "型式ランを追加した直後の見え方が、F-22より前に同じ操作をしたときと変わらない",
-    expect: "SEEDに同じ型式のランを足したとき、そのランのセル・危険一覧・漏れ一覧が旧い引き方（型式で共有）と0件差。写さなかった場合は差が出る（対照）",
-    async run({ mount, asserts }) {
-      const legacySeedCert = {
-        "DEMO-0001": { "DEMO-REG-A": "DEMO*A00/00*01", "DEMO-REG-B": "DEMO*B00/00*01", "DEMO-REG-D": "DEMO*D00/00*01" },
-        "DEMO-0002": { "DEMO-REG-A": "DEMO*A00/00*02", "DEMO-REG-D": "DEMO*D00/00*02" },
-        "DEMO-0003": { "DEMO-REG-A": "DEMO*A00/00*03", "DEMO-REG-A2": "DEMO*A02/00*01", "DEMO-REG-B": "DEMO*B00/00*02", "DEMO-REG-D": "DEMO*D00/00*03" },
-        "DEMO-0004": { "DEMO-REG-A": "DEMO*A00/00*04", "DEMO-REG-A2": "DEMO*A02/00*02", "DEMO-REG-D": "DEMO*D00/00*04" },
-      };
-      const shift = (n) => { const d = new Date(); d.setDate(d.getDate() + n); const p = (x) => String(x).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
-      const cases = [
-        ["DEMO-0001", { gen: "000D", lo: shift(-100), drop: shift(500) }],   // 生産中・継続の法規を実績で満たしている型式
-        ["DEMO-0004", { gen: "001B", lo: shift(200), drop: shift(1600) }],   // 開発中
-        ["DEMO-0003", { gen: "001B", lo: shift(-50), drop: shift(20) }],     // 生産中・REG-C を取り漏らしている型式
-      ];
-      for (const [typeId, fields] of cases) {
-        const c = await mountWith(mount, SEED);
-        await addRun(c, typeId, fields);
-        const snap = await snapshotAll(c);
-        const newV = viewOf(snap, evalCellWith, snap.cert);
-        const oldV = viewOf(snap, legacyEvalCellWith, legacySeedCert);
-        asserts.check(`${typeId} を追加：旧い引き方と同じ見え方`, JSON.stringify(newV) === JSON.stringify(oldV), true);
-        const k = snap.runs.at(-1).key;
-        asserts.check(`${typeId} を追加：追加したランの申請発生セル数（新／旧）`,
-          newV.cells.filter((x) => x.run === k && x.auto.status === "leak").length, oldV.cells.filter((x) => x.run === k && x.auto.status === "leak").length);
-        // 画面の危険一覧の件数も旧い引き方の件数と同じ
-        await openTab(c, "帳票");
-        const panel = [...c.querySelectorAll("button")].find((b) => b.textContent.includes("危険な型式ラン"));
-        const cellsOld = oldV.risk.reduce((n, r) => n + r.cells.length, 0);
-        asserts.checkTrue(`${typeId} を追加：画面の危険一覧の件数＝旧い引き方（${oldV.risk.length} ラン・${cellsOld} 件）`,
-          panel.parentElement.parentElement.textContent.includes(oldV.risk.length ? `${oldV.risk.length} ラン・${cellsOld} 件` : "0"));
-        // 対照：写さなかったら差が出る（この突き合わせが空振りしていない）
-        const noCopy = snap.cert.filter((x) => x.runKey !== k);
-        asserts.checkTrue(`${typeId} を追加：写さないと旧い見え方と違う（対照）`,
-          JSON.stringify(viewOf(snap, evalCellWith, noCopy)) !== JSON.stringify(oldV));
-      }
     },
   },
   {
