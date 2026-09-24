@@ -25,6 +25,7 @@ import {
   migrateLegacyCert,
 } from "../src/IListApp.jsx";
 import { DECISION_CASES } from "./decision-table-cases.js";
+import { DROP_CASES } from "./decision-table-cases-drop.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 window.__ALERTS__ = [];
@@ -152,9 +153,10 @@ const SCENARIOS = [
     run: async ({ asserts }) => {
       const d = decideCell({ lo: "2020-01-01", drop: "2025-12-31", shin: "2019-01-01", kei: "2021-01-01",
         today: "2026-01-01", certPlan: "実績なし+予定なし", side: "新" });
-      asserts.check("返す項目", Object.keys(d).sort(), [...OUT_KEYS].sort());
+      // F-24：印の項目 drop未定 と、表示の「判定不能」が増えた（A2・A3）。F-19の13項目はそのまま。
+      asserts.check("返す項目", Object.keys(d).sort(), [...OUT_KEYS, "drop未定"].sort());
       asserts.check("生産フェーズの値域", PRODUCTION_PHASES, ["開発中", "生産中", "drop済み"]);
-      asserts.check("表示の値域", CELL_DISPLAYS, ["否", "否・予告", "実績あり", "引き継ぎ確認中", "申請発生"]);
+      asserts.check("表示の値域", CELL_DISPLAYS, ["否", "否・予告", "実績あり", "引き継ぎ確認中", "申請発生", "判定不能"]);
       // 新型車規制はLOで、継続車規制はdropで比べる（両方をdropで比べるのは誤り）
       asserts.check("新型車規制はLOで比べる",
         [decideCell({ lo: "2020-01-01", drop: "2025-12-31", shin: "2019-01-01", kei: "2030-01-01", today: "2026-01-01", side: "新" }).適用した規制,
@@ -189,6 +191,53 @@ const SCENARIOS = [
       }
       asserts.check("固定表と一致しないケース数", bad.length, 0);
       if (bad.length) asserts.failures.push(bad.slice(0, 8).join("\n"));
+    },
+  },
+  {
+    id: "A5-F24-drop-cases",
+    name: "F-24 A5：決定表の入力に drop未定・LO未入力 を加えた402ケースを、固定した期待値の表と突き合わせる",
+    expect: "402件（drop未定186・LO未入力216）がすべて固定表と一致。drop未定は全件「要」・予告なし・drop済みにならない／LO未入力は全件「判定不能」",
+    run: async ({ asserts }) => {
+      const U = DROP_CASES.filter((r) => r.id.startsWith("U")), L = DROP_CASES.filter((r) => r.id.startsWith("L"));
+      asserts.check("ケース数（drop未定・LO未入力）", [DROP_CASES.length, U.length, L.length], [402, 186, 216]);
+      asserts.check("drop未定の入力は drop が空・LOあり", U.every((r) => r.in.drop === "" && r.in.lo !== ""), true);
+      asserts.check("LO未入力の入力は LO が空（drop空を含む）",
+        [L.every((r) => r.in.lo === ""), L.some((r) => r.in.drop === ""), L.some((r) => r.in.drop !== "")], [true, true, true]);
+      const pickF24 = (o) => ({ ...pick(o), drop未定: o.drop未定 });
+      const bad = [];
+      for (const r of DROP_CASES) {
+        const got = pickF24(decideCell({ ...r.in }));
+        if (JSON.stringify(got) !== JSON.stringify(r.out))
+          bad.push(`${r.id}\n  入力=${JSON.stringify(r.in)}\n  期待=${JSON.stringify(r.out)}\n  実際=${JSON.stringify(got)}`);
+      }
+      asserts.check("固定表と一致しないケース数", bad.length, 0);
+      if (bad.length) asserts.failures.push(bad.slice(0, 8).join("\n"));
+      // 表の性質（期待値の表そのものの点検。A1・A3・B2）
+      asserts.check("drop未定は全件「要」", U.every((r) => r.out.要否 === "要"), true);
+      asserts.check("drop未定に予告・drop済み・過去に不適合は無い",
+        U.some((r) => r.out.黄色予告 || r.out.生産フェーズ === "drop済み" || r.out.過去に法規不適合), false);
+      asserts.check("LO未入力は全件「判定不能」・危険の2条件に当たらない",
+        L.every((r) => r.out.表示 === "判定不能" && !r.out.現在法規不適合 && !r.out.黄色予告), true);
+      asserts.check("どのケースも「否」を出さない（B2）", DROP_CASES.some((r) => r.out.要否 === "否" || r.out.表示.startsWith("否")), false);
+      // 空の書き方の違い（undefined・null・空白だけ）も同じ扱い
+      const inp = { lo: "2040-01-01", shin: "2039-01-01", kei: "2041-01-01", today: "2040-06-01", side: "継" };
+      asserts.check("dropの空の書き方（'' / 空白 / undefined / null）",
+        ["", "  ", undefined, null].map((drop) => [decideCell({ ...inp, drop }).要否, decideCell({ ...inp, drop }).drop未定]),
+        [["要", true], ["要", true], ["要", true], ["要", true]]);
+      asserts.check("LOの空の書き方（'' / 空白 / undefined / null）",
+        ["", "  ", undefined, null].map((lo) => decideCell({ ...inp, lo, drop: "2045-01-01" }).表示),
+        ["判定不能", "判定不能", "判定不能", "判定不能"]);
+      asserts.check("LOもdropも空なら判定不能を優先（drop未定の印は付けない）",
+        [decideCell({ ...inp, lo: "", drop: "" }).表示, decideCell({ ...inp, lo: "", drop: "" }).drop未定], ["判定不能", false]);
+      asserts.check("LO・dropが両方入っていれば drop未定 は付かない", decideCell({ ...inp, drop: "2045-01-01" }).drop未定, false);
+      // B1：LO・dropが両方入っている852件には、印も判定不能も1件も出ない（852件の中身の一致は C2-all-852）
+      asserts.check("852件に drop未定・判定不能が出ない",
+        DECISION_CASES.filter((r) => { const d = decideCell({ ...r.in }); return d.drop未定 !== false || d.表示 === "判定不能"; }).length, 0);
+      // evalCellWith の状態：判定不能は否（off）と区別する
+      asserts.check("evalCellWith の状態（判定不能・drop未定）",
+        [evalCellWith({}, { key: "x", sk: "継", lo: "", drop: "2045-01-01" }, { rid: "g1", shin: inp.shin, kei: inp.kei }, null, inp.today).status,
+         evalCellWith({}, { key: "x", sk: "継", lo: inp.lo, drop: "" }, { rid: "g1", shin: inp.shin, kei: inp.kei }, null, inp.today).status],
+        ["unknown", "leak"]);
     },
   },
   {
@@ -415,11 +464,12 @@ const SCENARIOS = [
       asserts.check("認可書なしは申請発生のまま", [e2.required, e2.kind, e2.ck, e2.status], [true, "継続", null, "leak"]);
       asserts.check("期日は適用した規制日のまま", [e.dueDate, e2.dueDate], [LONG_AGO, LONG_AGO]);
       // 黄色予告：窓の中・これから来る継続車日なら出る／今日以前なら出ない（F-15を維持）
+      // F-24：LOが空のランは判定不能で予告も出ないので、ダミーのランには過去のLOを持たせる（LOは予告の条件に効かない）。
       asserts.check("窓の中でこれからは出る",
-        approachingNoticeFor("off", { drop: shift(5) }, { kei: shift(15) }), { days: 10, keiDate: shift(15) });
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: shift(5) }, { kei: shift(15) }), { days: 10, keiDate: shift(15) });
       asserts.check("継続車日が今日以前は出ない",
-        [approachingNoticeFor("off", { drop: shift(-11) }, { kei: YESTERDAY }),
-         approachingNoticeFor("off", { drop: shift(-10) }, { kei: TODAY_D })], [null, null]);
+        [approachingNoticeFor("off", { lo: LONG_AGO, drop: shift(-11) }, { kei: YESTERDAY }),
+         approachingNoticeFor("off", { lo: LONG_AGO, drop: shift(-10) }, { kei: TODAY_D })], [null, null]);
       asserts.check("実績ありのセルには出さない（決定表のゲート）",
         decideCell({ lo: LONG_AGO, drop: shift(5), shin: LONG_AGO, kei: shift(15), today: TODAY_D, side: "継", certPlan: "実績あり" }).黄色予告,
         null);

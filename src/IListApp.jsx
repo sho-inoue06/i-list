@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { AlertTriangle, ShieldCheck, Minus, Activity, Pencil, Cpu, Plus, Trash2, Download, Upload, Table2, Scale, FileCheck } from "lucide-react";
+import { AlertTriangle, ShieldCheck, Minus, Activity, Pencil, Cpu, Plus, Trash2, Download, Upload, Table2, Scale, FileCheck, HelpCircle } from "lucide-react";
 
 // ───────────────────────────────────────────────
 // Iリスト 帳票アプリ（段階2：サーバ保存）
@@ -40,6 +40,8 @@ export const TEXT = {
     要:       "要",
     申請発生:   "申請発生",
     引き継ぎ確認中: "引き継ぎ確認中",      // F-19 C4（同じ型式の過去ランに実績あり・当プロジェクトの番号は空）
+    判定不能:   "判定不能（LO未入力）",   // F-24 A3。「否」（対応不要）とは別の見た目にする
+    drop未定:   "drop未定",             // F-24 A2。drop＝∞（生産継続）の仮定で判定したセルの要注意表示
   },
   // 生産フェーズ（F-19 C5）。型式ランの列見出しに1語だけ出す。セルの状態名には混ぜない。
   phase: {
@@ -60,6 +62,8 @@ export const TEXT = {
     日数不明:  "日数不明（日付が読めません）",
     // A9の印。判定は変えず、印を付けるだけ。
     同一性未確認: "同一性 未確認",
+    // F-24 A4。LOを迎えたのにdropが空のラン（入力漏れの異常）。ラン単位で1行だけ出す。
+    drop未入力:  "drop未入力（LO済み）",
   },
 };
 // 「今日」（F-13）。画面を開いた／再読み込みした時点の端末ローカル日付を使う。
@@ -365,6 +369,8 @@ const dateDayNumber = (s) => {
 //   今日が読めない → 生産中／LOが読めない → もう迎えている／dropが読めない → まだ生産中／
 //   規制日が読めない → もう到来している。
 //   ただし要否だけは文字列比較のままで、法規DBの日付が空なら要にしない（適合を要求する日が無いため）。
+//   F-24：LO・dropが**空**のときだけは別に扱う（dropInputStateOf）。LOが空＝判定不能、
+//   dropが空（LOあり）＝drop＝∞（生産継続）として要否を決める。入っているが読めない日付は上のとおり。
 // ───────────────────────────────────────────────
 export const PRODUCTION_PHASES = ["開発中", "生産中", "drop済み"];
 export const EFFECTIVE_SIDES = ["新", "継"];
@@ -372,7 +378,21 @@ export const CERT_PLAN_STATES = ["実績あり", "実績なし+予定あり", "�
 export const APPLIED_REGS = ["新型", "継続", "なし"];
 export const DEADLINE_KINDS = ["なし", "規制日", "LO"];
 export const VEHICLE_APPLICATIONS = ["発生しない", "発生する（計画済み）", "発生する（未計画）"];
-export const CELL_DISPLAYS = ["否", "否・予告", "実績あり", "引き継ぎ確認中", "申請発生"];
+export const CELL_DISPLAYS = ["否", "否・予告", "実績あり", "引き継ぎ確認中", "申請発生", "判定不能"];
+
+// LO・dropの入力状態（F-24）。空（未入力・空白だけ）かどうかだけを見る。日付として読めるかは見ない
+// （入っているが読めない日付は、従来どおり「警告を弱めない側」の読み方に任せる）。
+//   "LO未入力" … LOが空。要否を決める日付が無いので、全法規を「判定不能」にする（A3）
+//   "drop未定" … LOはあり、dropが空。生産が続く前提で drop＝∞ として判定する（A1）。dropは空のまま（B3）
+//   "入力済み" … 両方入っている。F-24より前と同じ判定（B1）
+// LOもdropも空なら "LO未入力"（判定不能を優先する）。
+export const DROP_INPUT_STATES = ["入力済み", "drop未定", "LO未入力"];
+const isBlankDate = (s) => typeof s !== "string" || s.trim() === "";
+export function dropInputStateOf(lo, drop) {
+  if (isBlankDate(lo)) return "LO未入力";
+  if (isBlankDate(drop)) return "drop未定";
+  return "入力済み";
+}
 
 // 生産フェーズ。LO・drop・今日だけで決まり、法規には一切依存しない（＝列見出しに出せる）。
 export function productionPhaseOf(lo, drop, today = TODAY) {
@@ -427,14 +447,29 @@ export function decideCell({
   certPlan = "実績なし+予定なし", side = "新", 根拠未確認 = false, handover = false,
 } = {}) {
   const 生産フェーズ = productionPhaseOf(lo, drop, today);
+  const 入力 = dropInputStateOf(lo, drop);
+
+  // ── LO未入力（F-24 A3）：判定不能。「否」（対応不要）とは見せない（B2） ──
+  //   要否を決める日付が無いので、要にも否にもしない。不適合・予告・危険のどれにも当たらない。
+  if (入力 === "LO未入力") {
+    return {
+      生産フェーズ, 要否: "判定不能", 適用した規制: "なし", 車両申請: null, 期限: "なし",
+      現在法規不適合: false, 過去に法規不適合: false, 法規適合必要: false, 黄色予告: null, 根拠未確認: !!根拠未確認,
+      規制日: "", 期限日: "", 超過: false, 表示: "判定不能", drop未定: false,
+    };
+  }
+  // drop未定（F-24 A1）：drop＝∞ として判定する。継続車規制は「要 ⇔ drop ＞ 継続車日」なので、
+  // 継続車日が入っていれば常に要になる。dropの値そのものは作らない・保存しない（B3）。
+  const drop未定 = 入力 === "drop未定";
+  const 継続到来 = (k) => !!k && (drop未定 || k <= drop);
 
   // ── 要否と適用した規制（現行式をそのまま写し取る。文字列比較も現行どおり） ──
   let 適用した規制 = "なし";
   if (side === "新") {
     if (shin && shin <= lo) 適用した規制 = "新型";
-    else if (kei && kei <= drop) 適用した規制 = "継続";
+    else if (継続到来(kei)) 適用した規制 = "継続";
   } else {
-    if (kei && kei <= drop) 適用した規制 = "継続";
+    if (継続到来(kei)) 適用した規制 = "継続";
   }
   const 要 = 適用した規制 !== "なし";
   const 要否 = 要 ? "要" : "否";
@@ -462,6 +497,7 @@ export function decideCell({
   //   加えて F-15：継続車規制日 ≤ 今日（もう過ぎた組み合わせ）には出さない
   //   （黄色は これから来る規制日の予告 であるため。2026-09-22 祥の判断でF-19でも維持）。
   //   はい／いいえだけでなく画面に出す日数・日付も要るので、はい＝オブジェクト／いいえ＝null で返す。
+  //   drop未定（∞）には「dropの後30日」という窓が無いので、窓は読めない＝予告なし（F-24）。
   const 窓 = approachingKeiDays(drop, kei);
   const keiDay = dateDayNumber(kei), todayDay = dateDayNumber(today);
   const 黄色予告 = !要 && !実績あり && 窓 !== null &&
@@ -477,6 +513,8 @@ export function decideCell({
     生産フェーズ, 要否, 適用した規制, 車両申請, 期限: dl.期限,
     現在法規不適合, 過去に法規不適合, 法規適合必要, 黄色予告, 根拠未確認: !!根拠未確認,
     規制日, 期限日: dl.期限日, 超過, 表示,
+    // drop未定（F-24 A2）：drop＝∞ の仮定で判定したセル。表示の印に使うだけで、上の判定には効かない。
+    drop未定,
   };
 }
 
@@ -505,7 +543,8 @@ export const evalCellWith = (cert, run, r, sameness, today = TODAY) => {
   });
   const required = d.要否 === "要";
   const kind = d.適用した規制 === "なし" ? "" : d.適用した規制;
-  const status = !required ? "off" : ck ? "ok" : "leak";
+  // "unknown" … 判定不能（LO未入力・F-24 A3）。否（"off"）とは区別する。
+  const status = d.表示 === "判定不能" ? "unknown" : !required ? "off" : ck ? "ok" : "leak";
   return { required, kind, ck, status, dueDate: d.規制日, applied };
 };
 
@@ -535,7 +574,8 @@ export function approachingKeiDays(dropStr, keiStr) {
 // （実績を見た判定は evalCellWith 側の decision.黄色予告 が持つ）。
 export function approachingNoticeFor(cellStatus, run, r, today = TODAY) {
   if (cellStatus !== "off") return null;
-  return decideCell({ drop: run?.drop, kei: r?.kei, today, side: "継",
+  // LOも渡す（F-24）：LOが空のランは判定不能で、予告も出さない。
+  return decideCell({ lo: run?.lo, drop: run?.drop, kei: r?.kei, today, side: "継",
     certPlan: "実績なし+予定なし" }).黄色予告;
 }
 
@@ -1209,6 +1249,7 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
   const decIdx = judge ? decisionIndex(decisions) : null;
   const byRun = new Map();   // run（オブジェクト）→ reg（オブジェクト）→ セルの結果
   const phases = new Map();  // run（オブジェクト）→ 生産フェーズ（列見出し用・C5）
+  const alerts = new Map();  // run（オブジェクト）→ ラン単位の異常（F-24 A4）。無ければ入れない
   const list = [];
   for (const run of runs || []) {
     const m = new Map();
@@ -1253,15 +1294,25 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
     byRun.set(run, m);
     // 生産フェーズ（C5）は法規行に依存しないので、そのランのどのセルから取っても同じ値になる。
     // 法規が1行も無いときだけ決定表を直接呼ぶ（そのときは列見出し自体が描かれないが、値は返せるようにする）。
-    phases.set(run, m.size > 0
+    const phase = m.size > 0
       ? m.values().next().value.decision.生産フェーズ
-      : productionPhaseOf(run.lo, run.drop, today));
+      : productionPhaseOf(run.lo, run.drop, today);
+    phases.set(run, phase);
+    // ラン単位の異常（F-24 A4）：LOを迎えた（今日を含む）のにdropが空。実務ではdropが決まっているはずなので入力漏れ。
+    // 日付をここで比べ直さない：dropが空なら drop済み にはならないので、「開発中でない」＝LO ≤ 今日 である
+    // （LOが読めない日付のときも「もう迎えている」側＝異常として出す。警告を弱めない側）。
+    // 法規の日付とは無関係に立つ＝継続車日がまだ先の法規しか無いランでも出る（F-24 決めたこと 案b）。
+    if (dropInputStateOf(run.lo, run.drop) === "drop未定" && phase !== "開発中") alerts.set(run, "drop未入力");
   }
   return {
     list,
     get: (run, reg) => byRun.get(run)?.get(reg) || null,
     // 型式ランの列見出しに出す1語（C5）。セルの状態名とは混ぜない。
     phaseOf: (run) => phases.get(run) || null,
+    // ラン単位の異常（F-24 A4）。"drop未入力" か null。
+    alertOf: (run) => alerts.get(run) || null,
+    // 集約した型式ラン（入力の順）。法規が0件でもラン単位の異常を一覧へ出すために使う（Codexレビュー指摘1）。
+    runs: [...(runs || [])],
   };
 }
 
@@ -1315,7 +1366,7 @@ export function riskOfCell(decision, today = TODAY) {
 // 切迫している順（A3）。小さい＝切迫。日数が読めない行は最後。
 // 同点のときは不適合を先にする（数の上では超過が必ず 0 以下・予告が 1 以上なので
 // 実際には日数が読めない行どうしでしか起きないが、規則として明示しておく）。
-const RISK_RANK = { 不適合: 0, 予告: 1 };
+const RISK_RANK = { 不適合: 0, 予告: 1, drop未入力: 2 };
 const cmpUrgency = (a, b) => {
   if (a.urgency === null && b.urgency === null) return RISK_RANK[a.kind] - RISK_RANK[b.kind];
   if (a.urgency === null) return 1;
@@ -1332,24 +1383,40 @@ const cmpUrgency = (a, b) => {
 //
 // 法規行の順序は model.list の順（runs の順 × regs の順）を保ったまま切迫度で並べ替える
 // （Array.prototype.sort は安定なので、同じ切迫度の行は元の法規順のまま残る）。
+//
+// ラン単位の異常（F-24 A4「drop未入力（LO済み）」）は、危険な法規が1つも無いランでも行を出す。
+// 1ランにつき1つの印（alert）で持ち、cells には入れない＝法規単位の件数に混ざらない（B6）。
+// 危険な法規もあるランでは、その行に印が付くだけ（行は増えない）。
+// 危険な法規が1つも無いランは切迫度が無い（null）ので、日数が読めない行と同じく最後に並ぶ。
+// ラン単位の異常はセルではなくランから拾う（法規が0件のデータでも出す。Codexレビュー指摘1）。
 export function riskRunRows(model, { runs = null } = {}) {
   const allow = runs ? new Set(runs) : null;
-  const byRun = new Map();
+  const cellsOf = new Map();
   for (const m of model.list) {
     if (!m.risk) continue;
-    if (allow && !allow.has(m.run)) continue;
-    if (!byRun.has(m.run)) byRun.set(m.run, []);
-    byRun.get(m.run).push(m);
+    if (!cellsOf.has(m.run)) cellsOf.set(m.run, []);
+    cellsOf.get(m.run).push(m);
+  }
+  // 並びは model のランの順（＝F-24より前と同じ model.list の順）。同じランは1回だけ。
+  const order = new Set(model.runs || model.list.map((m) => m.run));
+  const byRun = new Map();
+  for (const run of order) {
+    if (allow && !allow.has(run)) continue;
+    const cells = cellsOf.get(run) || [];
+    if (cells.length > 0 || model.alertOf?.(run)) byRun.set(run, cells);
   }
   const rows = [];
   for (const [run, cells] of byRun) {
     cells.sort((a, b) => cmpUrgency(a.risk, b.risk));
     const bad = cells.filter((m) => m.risk.kind === "不適合").length;
-    const head = cells[0].risk;   // 最も切迫した法規行（並べ替え済みなので先頭）
+    const alert = model.alertOf?.(run) || null;
+    // 最も切迫した法規行（並べ替え済みなので先頭）。危険な法規が無いラン（異常だけ）は null。
+    const head = cells.length > 0 ? cells[0].risk : { kind: alert, urgency: null };
     rows.push({
       run, phase: model.phaseOf(run), cells,
       bad, warn: cells.length - bad,
-      kind: head.kind, urgency: head.urgency, top: head,
+      kind: head.kind, urgency: head.urgency, top: cells.length > 0 ? head : null,
+      alert,
       // A9：同一性が未確認（比較元があるのに未回答）のセルを含むか。印だけで、並べる条件には効かない。
       unconfirmed: cells.some((m) => m.decision.根拠未確認),
     });
@@ -2267,6 +2334,28 @@ export function SamenessUnknownMark({ title }) {
   );
 }
 
+// drop未定の要注意表示（F-24 A2）。drop＝∞（生産継続）の仮定で判定したことを示す印で、判定は変えない。
+// 帳票セルと危険一覧の法規行が同じ部品を使う。
+export function DropUndecidedMark() {
+  return (
+    <span title="dropが未入力です。生産が続く前提（drop＝∞）で判定しています。dropは空のままです。"
+      style={{ display:"inline-block", fontSize:9, fontWeight:700, padding:"0 5px", borderRadius:3,
+        border:`1px dashed ${ORANGE}`, color:ORANGE, background:`${ORANGE}14`, lineHeight:1.7, marginLeft:5 }}>
+      {TEXT.cell.drop未定}
+    </span>
+  );
+}
+// ラン単位の異常（F-24 A4）。LOを迎えたのにdropが空＝入力漏れ。ラン行に1つだけ付ける。
+function DropMissingMark() {
+  return (
+    <span title="LOを迎えているのにdropが未入力です（通常はdropが決まっているはずの入力漏れ）。法規の判定は drop＝∞ で出しています。"
+      style={{ display:"inline-block", fontSize:10, fontWeight:800, padding:"0 6px", borderRadius:3,
+        border:`1px solid ${RED}`, color:RED, background:`${RED}18`, lineHeight:1.7, marginLeft:10 }}>
+      {TEXT.risk.drop未入力}
+    </span>
+  );
+}
+
 function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState([]);   // 展開中の型式ラン（オブジェクトで持つ。key は重複しうる）
@@ -2331,8 +2420,10 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
                           <span style={{ fontSize:9.5, color:MUTE, fontFamily:"ui-monospace,monospace" }}>
                             LO {fmt(r.run.lo)}・drop {fmt(r.run.drop)}</span>
                         </button>
-                        <span style={{ marginLeft:10, fontSize:10.5, color:"#aab8c6" }}>{TEXT.risk.内訳(r.bad, r.warn)}</span>
-                        <span style={{ marginLeft:10, fontSize:10.5 }}><RiskDays risk={r.top} /></span>
+                        {r.alert && <DropMissingMark />}
+                        {r.top && <>
+                          <span style={{ marginLeft:10, fontSize:10.5, color:"#aab8c6" }}>{TEXT.risk.内訳(r.bad, r.warn)}</span>
+                          <span style={{ marginLeft:10, fontSize:10.5 }}><RiskDays risk={r.top} /></span></>}
                         {r.unconfirmed && <SamenessUnknownMark title={MARK_TITLE} />}
                       </td>
                     </tr>
@@ -2344,6 +2435,7 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
                         </td>
                         <td style={td}>
                           <RiskState m={m} />
+                          {m.decision.drop未定 && <DropUndecidedMark />}
                           {m.decision.根拠未確認 && <SamenessUnknownMark title={MARK_TITLE} />}
                         </td>
                         <td style={{ ...td, fontSize:10.5, color:"#aab8c6", whiteSpace:"nowrap" }}>
@@ -2372,6 +2464,11 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
             （前者は件数が多すぎて検出の意味がなくなり、後者はいま手を打てないため）。
             まだラインオフしていないランは期限がLOになるため、{TEXT.compliance.法規不適合()}では出ません。
             ドロップ済みのランでも、<b>ドロップ直後にこれから継続規制が来る</b>場合は予告として出ます（ドロップが延びれば引っかかるため）。
+            dropが空のランは<b>生産が続く前提（drop＝∞）</b>で同じ2条件に通し、出た行に
+            <span style={{ display:"inline-flex", verticalAlign:"middle" }}><DropUndecidedMark /></span> を付けます。
+            <b>LOを迎えたのにdropが空</b>のランは入力漏れとして、法規に関係なくラン単位で
+            <b style={{ color:RED }}>{TEXT.risk.drop未入力}</b> を出します（法規の件数には数えません）。
+            LOが空のランは判定不能なので出しません（帳票のセルに出ます）。
             状態・規制日・期限は<b>帳票のセルとまったく同じ判定結果</b>で、ここでは束ねて並べているだけです。
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><SamenessUnknownMark title={MARK_TITLE} /></span>
             は、比較元があるのに同一性が未回答のセルを含む印です（判定は安全側の新型車側で出しています。印があること自体は一覧に出す理由にしません）。
@@ -2395,6 +2492,8 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
     "実績あり":       { bg:"rgba(63,191,143,0.13)", bd:GREEN, fg:GREEN, dash:false },
     "引き継ぎ確認中": { bg:"rgba(63,191,143,0.04)", bd:GREEN, fg:GREEN, dash:true  },
     "申請発生":       { bg:"rgba(255,107,87,0.16)", bd:RED,   fg:RED,   dash:false },
+    // F-24 A3：LO未入力。「否」（対応不要）と同じ見た目にしない（B2）。
+    "判定不能":       { bg:"rgba(157,140,255,0.08)", bd:"#9d8cff", fg:"#b9adff", dash:true },
   };
   const cellStyle=(display)=> CELL_STYLE[display] || CELL_STYLE["否"];
   // 判断機能はpropsが渡されたときだけ有効（フックは常に同じ順序で呼ぶ）
@@ -2447,6 +2546,10 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
   // ※ 新しいフックは既存フックより後ろに置く（既存の呼び出し順を動かさないため）。
   const riskRows = useMemo(() => riskRunRows(model, { runs: visibleRuns }), [model, visibleRuns]);
 
+  // 法規が0件でも、ラン単位の異常（F-24 A4「drop未入力（LO済み）」）は危険一覧に出す（Codexレビュー指摘1）。
+  const riskOnly = riskRows.length > 0
+    ? <RiskPanel rows={riskRows} filterActive={filterActive} shownRuns={visibleRuns.length} totalRuns={runs.length} />
+    : null;
   if (runs.length===0 || regs.length===0) {
     // データが空でも、保持している列フィルターの選択は見せて手動解除できるようにする
     // （型式ラン・法規を全削除したあとに古い選択が残るケース。自動では解除しない）。
@@ -2458,11 +2561,12 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
             selProjects={selProjects} setSelProjects={columnFilter.setSelProjects}
             selTypes={selTypes} setSelTypes={columnFilter.setSelTypes}
             total={runs.length} shown={0} active onClearAll={columnFilter.clear} />
+          {riskOnly}
           <Empty msg="型式ランと法規を入力すると、ここに適合・実績の帳票が出ます。" />
         </>
       );
     }
-    return <Empty msg="型式ランと法規を入力すると、ここに適合・実績の帳票が出ます。" />;
+    return <>{riskOnly}<Empty msg="型式ランと法規を入力すると、ここに適合・実績の帳票が出ます。" /></>;
   }
   return (
     <>
@@ -2555,6 +2659,9 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                       {disp==="申請発生" && <>
                         <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:800 }}>{TEXT.cell.申請発生}</span><Badge kind={c.kind}/></div>
                         <ComplianceLabel s={m.compliance} /></>}
+                      {disp==="判定不能" &&
+                        <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><HelpCircle size={12}/><span style={{ fontSize:10.5, fontWeight:700 }}>{TEXT.cell.判定不能}</span></div>}
+                      {m.decision.drop未定 && <div><DropUndecidedMark /></div>}
                       {showSame && !isEditingSame &&
                         <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c} compliance={m.compliance}
                           unconfirmedSide={m.decision.根拠未確認}
@@ -2586,6 +2693,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
       <div style={{ display:"flex", gap:16, marginTop:10, fontSize:10.5, color:MUTE, flexWrap:"wrap", alignItems:"center" }}>
         <Leg c={GREEN} t="要・認可書あり（濃い緑）"/><Leg c={GREEN} t="要・引き継ぎ確認中（薄い緑・破線）"/>
         <Leg c={RED} t="要・実績なし＝申請発生"/><Leg c={MUTE} t="否＝対象外"/>
+        <Leg c="#9d8cff" t="判定不能＝LOが未入力（破線）"/><Leg c={ORANGE} t="drop未定＝dropが空なので生産継続（drop＝∞）として判定"/>
         <Leg c={AMBER} t="否・ドロップ後30日以内にこれから継続規制＝要再確認"/>
         <span style={{ display:"inline-flex", gap:5 }}><Badge kind="新型"/>指定で適合<Badge kind="継続"/>継続対応</span>
       </div>
@@ -2982,6 +3090,7 @@ function DecisionEditor({ run, reg, regs, dec, auto, notice, onSave, onCancel, d
 
   const autoText = auto.status==="ok" ? `要・認可書あり（${auto.ck}）`
     : auto.status==="leak" ? "要・実績なし＝申請発生"
+    : auto.status==="unknown" ? TEXT.cell.判定不能
     : "否（日程上の適用対象外）";
   return (
     <div style={{ marginTop:5, borderTop:`1px dashed ${LINE}`, paddingTop:6, display:"flex", flexDirection:"column", gap:6, textAlign:"left" }}>

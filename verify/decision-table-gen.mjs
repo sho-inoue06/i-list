@@ -137,6 +137,99 @@ export const DECISION_CASES = `;
 writeFileSync("verify/decision-table-cases.js",
   header + JSON.stringify(rows, null, 0).replace(/\},\{"id"/g, "},\n{\"id\"") + ";\n", "utf8");
 
+// ───────────────────────────────────────────────
+// F-24：決定表の入力に「drop未定」「LO未入力」を加えた総当たり（A5）。
+// 上の852件（LO・dropが両方入っている）とは別ファイルに書く。852件のファイルはF-24で1バイトも変えない（B1）。
+//
+//   drop未定（LOあり・drop空）… drop を順位 +∞ として上と同じ参照実装に通す（A1：drop＝∞）。
+//     残り4要素（LO・新型車日・継続車日・今日）の弱順序75 のうち 新型車日<継続車日 … 31
+//     dropの後の30日窓は無い（∞の後に日付は来ない）ので、黄色予告の割り方は無い。
+//     31 × 認証3 × 区分2 = 186
+//   LO未入力（LO空）… 要否を決めない（判定不能・A3）。dropが入っている場合と空の場合の両方を作る。
+//     dropあり：4要素（drop・新型車日・継続車日・今日）で 新型車日<継続車日 … 31
+//     drop空  ：3要素（新型車日・継続車日・今日）で 新型車日<継続車日 … 5
+//     36 × 認証3 × 区分2 = 216
+//   合計 402。期待値はここでも製品コードを呼ばずに作る。
+// ───────────────────────────────────────────────
+function weakOrders(keys) {
+  const out = [];
+  (function walk(i, cur) {
+    if (i === keys.length) {
+      const used = new Set(cur);
+      for (let v = 0; v <= Math.max(...cur); v++) if (!used.has(v)) return;
+      out.push(Object.fromEntries(keys.map((k, j) => [k, cur[j]])));
+      return;
+    }
+    for (let v = 0; v < keys.length; v++) { cur.push(v); walk(i + 1, cur); cur.pop(); }
+  })(0, []);
+  return out.filter((o) => o.shin < o.kei);
+}
+const dropRows = [];
+const SPACING = 100;
+// drop未定
+weakOrders(["lo", "shin", "kei", "today"]).forEach((o4, i) => {
+  const o = { ...o4, drop: Infinity };
+  const date = (k) => dateOf(ANCHOR_DAY + o[k] * SPACING);
+  const input = { lo: date("lo"), drop: "", shin: date("shin"), kei: date("kei"), today: date("today") };
+  for (const certPlan of CERT) for (const side of SIDES) {
+    const e = expectOf(o, null, certPlan, side);
+    const 規制日 = e.適用した規制 === "新型" ? input.shin : input.kei;
+    const 期限日 = e.期限 === "LO" ? input.lo : e.期限 === "規制日" ? 規制日 : "";
+    dropRows.push({
+      id: `U${String(i).padStart(3, "0")}/${certPlan}/${side}`,
+      in: { ...input, certPlan, side },
+      out: {
+        生産フェーズ: e.生産フェーズ, 要否: e.要否, 適用した規制: e.適用した規制,
+        車両申請: e.車両申請, 期限: e.期限, 期限日,
+        現在法規不適合: e.現在法規不適合, 過去に法規不適合: e.過去に法規不適合,
+        法規適合必要: e.法規適合必要, 黄色予告: null,
+        根拠未確認: false, 規制日, 超過: e.超過, 表示: e.表示, drop未定: true,
+      },
+    });
+  }
+});
+// LO未入力
+const loBlank = [
+  ...weakOrders(["drop", "shin", "kei", "today"]),
+  ...weakOrders(["shin", "kei", "today"]).map((o) => ({ ...o, drop: null })),
+];
+loBlank.forEach((o, i) => {
+  const date = (k) => dateOf(ANCHOR_DAY + o[k] * SPACING);
+  const input = { lo: "", drop: o.drop === null ? "" : date("drop"), shin: date("shin"), kei: date("kei"), today: date("today") };
+  // 生産フェーズは LO・drop・今日だけで決まる（LOが無いので開発中にはならない。dropが空なら drop済みにもならない）
+  const 生産フェーズ = o.drop !== null && o.drop < o.today ? "drop済み" : "生産中";
+  for (const certPlan of CERT) for (const side of SIDES) {
+    dropRows.push({
+      id: `L${String(i).padStart(3, "0")}/${certPlan}/${side}`,
+      in: { ...input, certPlan, side },
+      out: {
+        生産フェーズ, 要否: "判定不能", 適用した規制: "なし", 車両申請: null, 期限: "なし", 期限日: "",
+        現在法規不適合: false, 過去に法規不適合: false, 法規適合必要: false, 黄色予告: null,
+        根拠未確認: false, 規制日: "", 超過: false, 表示: "判定不能", drop未定: false,
+      },
+    });
+  }
+});
+writeFileSync("verify/decision-table-cases-drop.js", `// ───────────────────────────────────────────────
+// 決定表（F-24 A5）の drop未定・LO未入力 の総当たりケースと期待値。**自動生成物・手で編集しない。**
+//
+//   作り方： node verify/decision-table-gen.mjs
+//   作った道具： verify/decision-table-gen.mjs
+//
+// 期待値は製品コード（decideCell）を一度も呼ばずに作ってある（drop未定は drop を順位 +∞ として
+// F-19と同じ参照実装に通したもの。LO未入力は判定不能の定数＋生産フェーズ）。
+//
+// ${dropRows.length}件 ＝ drop未定 ${dropRows.filter((r) => r.id.startsWith("U")).length}（順序31 × 認証3 × 区分2）
+//        ＋ LO未入力 ${dropRows.filter((r) => r.id.startsWith("L")).length}（順序36 × 認証3 × 区分2）。
+// ───────────────────────────────────────────────
+export const DROP_CASES = ` +
+  JSON.stringify(dropRows, null, 0).replace(/\},\{"id"/g, "},\n{\"id\"") + ";\n", "utf8");
+console.log("F-24 drop未定/LO未入力", dropRows.length,
+  "現在法規不適合", dropRows.filter((r) => r.out.現在法規不適合).length,
+  "法規適合必要", dropRows.filter((r) => r.out.法規適合必要).length,
+  "要", dropRows.filter((r) => r.out.要否 === "要").length,
+  "判定不能", dropRows.filter((r) => r.out.要否 === "判定不能").length);
+
 // ── 数え上げの自己点検（Notion F-19 の試算値と突き合わせる） ──
 const cnt = {}; const bump = (k) => cnt[k] = (cnt[k] || 0) + 1;
 for (const r of rows) {
