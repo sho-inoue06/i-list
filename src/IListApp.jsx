@@ -1311,6 +1311,8 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
     phaseOf: (run) => phases.get(run) || null,
     // ラン単位の異常（F-24 A4）。"drop未入力" か null。
     alertOf: (run) => alerts.get(run) || null,
+    // 集約した型式ラン（入力の順）。法規が0件でもラン単位の異常を一覧へ出すために使う（Codexレビュー指摘1）。
+    runs: [...(runs || [])],
   };
 }
 
@@ -1385,15 +1387,23 @@ const cmpUrgency = (a, b) => {
 // ラン単位の異常（F-24 A4「drop未入力（LO済み）」）は、危険な法規が1つも無いランでも行を出す。
 // 1ランにつき1つの印（alert）で持ち、cells には入れない＝法規単位の件数に混ざらない（B6）。
 // 危険な法規もあるランでは、その行に印が付くだけ（行は増えない）。
-// 法規が1つも無いランは切迫度が無い（null）ので、日数が読めない行と同じく最後に並ぶ。
+// 危険な法規が1つも無いランは切迫度が無い（null）ので、日数が読めない行と同じく最後に並ぶ。
+// ラン単位の異常はセルではなくランから拾う（法規が0件のデータでも出す。Codexレビュー指摘1）。
 export function riskRunRows(model, { runs = null } = {}) {
   const allow = runs ? new Set(runs) : null;
-  const byRun = new Map();
-  const touch = (run) => { if (!byRun.has(run)) byRun.set(run, []); return byRun.get(run); };
+  const cellsOf = new Map();
   for (const m of model.list) {
-    if (allow && !allow.has(m.run)) continue;
-    if (m.risk) touch(m.run).push(m);
-    else if (model.alertOf?.(m.run)) touch(m.run);
+    if (!m.risk) continue;
+    if (!cellsOf.has(m.run)) cellsOf.set(m.run, []);
+    cellsOf.get(m.run).push(m);
+  }
+  // 並びは model のランの順（＝F-24より前と同じ model.list の順）。同じランは1回だけ。
+  const order = new Set(model.runs || model.list.map((m) => m.run));
+  const byRun = new Map();
+  for (const run of order) {
+    if (allow && !allow.has(run)) continue;
+    const cells = cellsOf.get(run) || [];
+    if (cells.length > 0 || model.alertOf?.(run)) byRun.set(run, cells);
   }
   const rows = [];
   for (const [run, cells] of byRun) {
@@ -2536,6 +2546,10 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
   // ※ 新しいフックは既存フックより後ろに置く（既存の呼び出し順を動かさないため）。
   const riskRows = useMemo(() => riskRunRows(model, { runs: visibleRuns }), [model, visibleRuns]);
 
+  // 法規が0件でも、ラン単位の異常（F-24 A4「drop未入力（LO済み）」）は危険一覧に出す（Codexレビュー指摘1）。
+  const riskOnly = riskRows.length > 0
+    ? <RiskPanel rows={riskRows} filterActive={filterActive} shownRuns={visibleRuns.length} totalRuns={runs.length} />
+    : null;
   if (runs.length===0 || regs.length===0) {
     // データが空でも、保持している列フィルターの選択は見せて手動解除できるようにする
     // （型式ラン・法規を全削除したあとに古い選択が残るケース。自動では解除しない）。
@@ -2547,11 +2561,12 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
             selProjects={selProjects} setSelProjects={columnFilter.setSelProjects}
             selTypes={selTypes} setSelTypes={columnFilter.setSelTypes}
             total={runs.length} shown={0} active onClearAll={columnFilter.clear} />
+          {riskOnly}
           <Empty msg="型式ランと法規を入力すると、ここに適合・実績の帳票が出ます。" />
         </>
       );
     }
-    return <Empty msg="型式ランと法規を入力すると、ここに適合・実績の帳票が出ます。" />;
+    return <>{riskOnly}<Empty msg="型式ランと法規を入力すると、ここに適合・実績の帳票が出ます。" /></>;
   }
   return (
     <>

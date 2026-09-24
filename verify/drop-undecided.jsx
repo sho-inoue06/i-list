@@ -397,6 +397,30 @@ const SCENARIOS = [
     },
   },
   {
+    id: "R1-no-regs",
+    name: "Codexレビュー指摘1（A4・B6）：法規が0件でも、LO済み・drop空のランのラン単位の行を出す",
+    expect: "法規0件・ラン1件（LO＝T−1・drop空）で riskRunRows がラン行1本（印あり・法規0件）を返す。画面でも危険一覧に「drop未入力（LO済み）」が出る。LO未来・LO空・両方ありのランは出ない",
+    async run({ mount, asserts }) {
+      const T = "2031-03-15";
+      const runs = [
+        { key: "r861", typeId: "TYPE-NOREG", gen: "PJ-R", sk: "継", lo: "2031-03-14", drop: "" },
+        { key: "r862", typeId: "TYPE-FUTURE", gen: "PJ-R", sk: "継", lo: "2031-03-16", drop: "" },
+        { key: "r863", typeId: "TYPE-NOLO", gen: "PJ-R", sk: "継", lo: "", drop: "" },
+        { key: "r864", typeId: "TYPE-BOTH", gen: "PJ-R", sk: "継", lo: "2031-01-01", drop: "2032-01-01" },
+      ];
+      const model = buildCellModel({ runs, regs: [], evalCell: () => { throw new Error("法規0件なのでセルは作らない"); }, today: T });
+      const rows = riskRunRows(model, { runs });
+      asserts.check("ラン行（法規0件）", rows.map((r) => [r.run.key, r.alert, r.cells.length]), [["r861", "drop未入力", 0]]);
+      asserts.check("表示フィルターで外すと出ない", riskRunRows(model, { runs: [runs[1]] }).length, 0);
+      asserts.check("同じランを2回渡しても1行", riskRunRows(model, { runs: [runs[0], runs[0]] }).length, 1);
+      // 画面：LOを今日の前日にしたランだけ・法規0件
+      const c = await mountWith(mount, { runs: [{ ...runs[0], lo: shift(-1) }, { ...runs[3], lo: shift(-10), drop: shift(10) }], regs: [], cert: {} });
+      asserts.check("パネルの件数", riskCountText(c), L_COUNT(1, 0));
+      await openPanel(c);
+      asserts.check("画面のラン行", [groupTypeIds(c), riskGroups(c).map((g) => g.head.textContent.includes(L_MISSING))], [["TYPE-NOREG"], [true]]);
+    },
+  },
+  {
     id: "B6-one-row-per-run",
     name: "B6：ラン単位の「drop未入力（LO済み）」行は1ランにつき1行で、法規単位の件数に混ざらない",
     expect: "法規が3つあってもラン行は1本・印は1つ。パネルの件数は「4 ラン・2 件」（件＝法規単位の危険だけ：r801×REG-PAST・r802×REG-PAST）",
