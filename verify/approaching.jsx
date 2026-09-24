@@ -210,8 +210,9 @@ const SCENARIOS = [
     expect: "予告が出るのは「継続車日 > 今日」かつ「差が1〜30日」のときだけ。当日ちょうどは出さない（既発効側）",
     async run({ asserts }) {
       // 継続車日の位置（3通り）× 差（4通り）。dropは「継続車日 − 差」で作る。
+      // F-24：LOが空のランは判定不能で予告も出ないので、ダミーのランには過去のLOを持たせる（LOは予告の条件に効かない）。
       const notice = (kei, diff) =>
-        approachingNoticeFor("off", { drop: shift(-diff, kei) }, { kei });
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: shift(-diff, kei) }, { kei });
       const daysOf = (kei, diff) => { const n = notice(kei, diff); return n ? n.days : null; };
       const row = (kei) => [0, 1, 30, 31].map((d) => daysOf(kei, d));
       asserts.check("継続車日=前日（差 0/1/30/31）", row(YESTERDAY), [null, null, null, null]);
@@ -221,34 +222,34 @@ const SCENARIOS = [
       asserts.check("翌日・差30日の中身", notice(TOMORROW, 30), { days: 30, keiDate: TOMORROW });
       // 再現条件（Notionの「再現条件」そのもの）：継続車日＝今日・drop＝前日
       asserts.check("再現条件（継続車日=今日・drop=前日）は予告なし",
-        approachingNoticeFor("off", { drop: YESTERDAY }, { kei: TODAY_D }), null);
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: YESTERDAY }, { kei: TODAY_D }), null);
       // 遠い過去の組み合わせ（窓は満たすが、とっくに過ぎている）
       asserts.check("遠い過去の組み合わせも予告なし",
-        approachingNoticeFor("off", { drop: shift(-3651) }, { kei: LONG_AGO }), null);
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: shift(-3651) }, { kei: LONG_AGO }), null);
       // これから先の組み合わせは従来どおり出る（B3）
       asserts.check("遠い将来の組み合わせは従来どおり予告あり",
-        approachingNoticeFor("off", { drop: shift(-10, FAR) }, { kei: FAR }), { days: 10, keiDate: FAR });
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: shift(-10, FAR) }, { kei: FAR }), { days: 10, keiDate: FAR });
       // 既存の扱いは変えない：off 以外のセル・読めない日付には出さない
-      asserts.check("申請発生のセルには出さない", approachingNoticeFor("leak", { drop: TODAY_D }, { kei: shift(10) }), null);
-      asserts.check("認可書ありのセルには出さない", approachingNoticeFor("ok", { drop: TODAY_D }, { kei: shift(10) }), null);
-      asserts.check("dropが空なら出さない", approachingNoticeFor("off", { drop: "" }, { kei: shift(10) }), null);
-      asserts.check("継続車日が空なら出さない", approachingNoticeFor("off", { drop: TODAY_D }, { kei: "" }), null);
+      asserts.check("申請発生のセルには出さない", approachingNoticeFor("leak", { lo: LONG_AGO, drop: TODAY_D }, { kei: shift(10) }), null);
+      asserts.check("認可書ありのセルには出さない", approachingNoticeFor("ok", { lo: LONG_AGO, drop: TODAY_D }, { kei: shift(10) }), null);
+      asserts.check("dropが空なら出さない", approachingNoticeFor("off", { lo: LONG_AGO, drop: "" }, { kei: shift(10) }), null);
+      asserts.check("継続車日が空なら出さない", approachingNoticeFor("off", { lo: LONG_AGO, drop: TODAY_D }, { kei: "" }), null);
       // 実在しない日付。繰り上がって解釈されれば窓の中（9〜10日）に入る組み合わせなので、
       // 実在性チェックが外れていればここは null にならない（＝この期待値は素通りしない）。
       asserts.check("陽性対照：繰り上がった日付なら窓の中で予告が出る",
-        approachingNoticeFor("off", { drop: INVALID_KEI_DROP }, { kei: INVALID_KEI_ROLLED }),
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: INVALID_KEI_DROP }, { kei: INVALID_KEI_ROLLED }),
         { days: approachingKeiDays(INVALID_KEI_DROP, INVALID_KEI_ROLLED), keiDate: INVALID_KEI_ROLLED });
       asserts.checkTrue("陽性対照の差は窓の中（1〜30日）",
         approachingKeiDays(INVALID_KEI_DROP, INVALID_KEI_ROLLED) >= 1 && approachingKeiDays(INVALID_KEI_DROP, INVALID_KEI_ROLLED) <= 30);
       asserts.check("継続車日が実在しない日付なら出さない",
-        approachingNoticeFor("off", { drop: INVALID_KEI_DROP }, { kei: INVALID_KEI }), null);
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: INVALID_KEI_DROP }, { kei: INVALID_KEI }), null);
       asserts.check("dropが実在しない日付でも出さない",
-        approachingNoticeFor("off", { drop: INVALID_KEI }, { kei: shift(10, INVALID_KEI_ROLLED) }), null);
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: INVALID_KEI }, { kei: shift(10, INVALID_KEI_ROLLED) }), null);
       // 「今日」は引数で差し替えられる（既定は製品のTODAY）。基準日をUIや保存データへ持たせるものではない。
       asserts.check("todayを翌日にすると翌日の予告も消える",
-        approachingNoticeFor("off", { drop: shift(-1, TOMORROW) }, { kei: TOMORROW }, TOMORROW), null);
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: shift(-1, TOMORROW) }, { kei: TOMORROW }, TOMORROW), null);
       asserts.check("todayが読めないときは出さない",
-        approachingNoticeFor("off", { drop: shift(-1, TOMORROW) }, { kei: TOMORROW }, ""), null);
+        approachingNoticeFor("off", { lo: LONG_AGO, drop: shift(-1, TOMORROW) }, { kei: TOMORROW }, ""), null);
     },
   },
   {
