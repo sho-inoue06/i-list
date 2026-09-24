@@ -1,0 +1,29 @@
+# Current Run
+
+実装開始前に凍結する実行契約。進行状態のログではない。
+実装AI・レビューAIはこのファイルを変更しない。
+
+- Task:
+- Workflow:
+- Implementer:
+- Reviewer:
+- Reviewer model:
+- Reviewer effort:
+- Review invocation:
+- Review rounds:
+- Fix rounds:
+
+## Gates
+
+1.
+2.
+
+## Immutable
+
+- Preparation modeでの初回生成または空欄テンプレートの充填は許可する
+- 充填後はcurrent-run.mdを変更しない
+- Implementation modeとReview modeでは変更禁止
+- workflow、実装AI、レビューAI、停止点、回数を自己判断で変更しない
+- 仕様変更が必要なら実装を停止し、Notion更新後に/prepare-fを再実行する
+- Notion を読み書きしない
+- push、権限変更、仕様変更は別承認
