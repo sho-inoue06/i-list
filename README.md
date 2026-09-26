@@ -11,7 +11,7 @@
 - コミット: `c0efb949bcf1511ded128b085ac57b2fd153dcdd`
 - 参照元パス: `../i-list-reference/ilist-app/`
 
-このrepoは上記の `ilist-app/` 配下（`index.html`, `package.json`, `package-lock.json`, `vite.config.js`, `src/`, `server/`）をルート直下に移植したものです。旧repoのデータベース（SQLite）・Excel・個人設定・`.claude`・`.git`等は移植していません。詳細は [docs/current-task.md](docs/current-task.md) を参照。
+このrepoは上記の `ilist-app/` 配下（`index.html`, `package.json`, `package-lock.json`, `vite.config.js`, `src/`, `server/`）をルート直下に移植したものです。旧repoのデータベース（SQLite）・Excel・個人設定・`.claude`・`.git`等は移植していません。詳細は [docs/current-task-legacy-2026-09.md](docs/current-task-legacy-2026-09.md) を参照。
 
 ## 前提
 
@@ -76,7 +76,7 @@ node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
 - **⑤-0は未着手**です。
 - **Excel（指定装置一覧）取り込みは未実装**です。現行ソースにも実装がなく、今回の移植でも追加していません。
 - 画面上の日付基準 `TODAY` は定数（ハードコード）のままです。
-- （2026-09-06 対応済み）サーバへの初回接続に失敗した場合、読込成功として扱わないようにし、保存済みデータを自動保存で上書きしないよう修正しました。通信失敗・HTTPエラー・JSONとして解釈できない応答・データ形が不正な応答（`cert` が配列など）はすべて読込失敗として扱い、初回読込が成功するまで保存（PUT）を行いません（`src/IListApp.jsx` の起動時 `useEffect` と `isValidData` 参照）。保存状態の表示も「初回読込に失敗（保存は行われません）」と「保存に失敗（変更は未保存です）」を区別します。詳細と検証結果は [docs/current-task.md](docs/current-task.md) の追記を参照。
+- （2026-09-06 対応済み）サーバへの初回接続に失敗した場合、読込成功として扱わないようにし、保存済みデータを自動保存で上書きしないよう修正しました。通信失敗・HTTPエラー・JSONとして解釈できない応答・データ形が不正な応答（`cert` が配列など）はすべて読込失敗として扱い、初回読込が成功するまで保存（PUT）を行いません（`src/IListApp.jsx` の起動時 `useEffect` と `isValidData` 参照）。保存状態の表示も「初回読込に失敗（保存は行われません）」と「保存に失敗（変更は未保存です）」を区別します。詳細と検証結果は [docs/current-task-legacy-2026-09.md](docs/current-task-legacy-2026-09.md) の追記を参照。
 - 読込失敗後にサーバが復旧しても**自動では再読込しません**。画面をリロードする必要があります（再試行機能は未実装）。
 - （2026-09-06 対応済み）保存要求が前後した場合に、古い保存応答が最新の編集の保存表示を上書きしないようにしました（編集世代による判定）。世代は**データ変更を受け付けた時点**（`setRuns`/`setRegs`/`setCert`）で進めます。保存`useEffect`の中だけで進めていた当初の実装では、変更受付からEffect実行までの間に届いた古い応答が最新扱いされる窓が残っていたため、これを塞いだものです（JSON読込経路で再現・修正を確認済み）。**いずれも画面表示の整合性のための対応で、サーバ側の書込順序の競合そのものを解決するものではありません。**
 - プロジェクトグループ・認可継承の実装はありません。
