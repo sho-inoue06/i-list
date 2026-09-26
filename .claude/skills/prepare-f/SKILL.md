@@ -2,7 +2,7 @@
 name: prepare-f
 description: Notionの指定したFページを、機密情報を除いたcurrent-task.mdとcurrent-run.mdへ変換する準備作業
 disable-model-invocation: true
-argument-hint: "[FページURLまたはF番号] [workflow] [implementer] [reviewer]"
+argument-hint: "[FページURL] [workflow] [implementer] [reviewer]"
 ---
 
 # prepare-f
@@ -19,21 +19,10 @@ argument-hint: "[FページURLまたはF番号] [workflow] [implementer] [review
 ## 起動条件
 
 - ユーザーが明示的に `/prepare-f` を実行したときだけ動く
-- 指定されたNotion FページのURLまたはF番号が必要
+- 指定されたNotion FページのURLが必要
 - workflow、実装AI、レビューAIが指定されていない場合は推測せず停止する
-- F番号指定時は、Iリストのバックログ内だけを対象にF番号プロパティを完全一致で探す
-- F番号指定時は、ワークスペース全体の一般検索で候補を広げない
-- F番号に一致しないページや、該当Fページ以外のNotionページを読まない
-
-## 入力の解決
-
-- 正確なNotion FページURLが指定された場合は、そのページだけを読み、ページのF番号と状態を確認する。他ページを検索しない。
-- F番号（例：`F-24`）が指定された場合は、Iリストのバックログ内からF番号プロパティを完全一致で探す。
-- F番号指定時は、ページのF番号プロパティが指定値と完全一致し、状態が「定義済み」であることを確認する。
-- 完全一致するページが1件だけの場合に限り、そのページを読む。
-- 一致するページが0件なら停止して「該当Fなし」と報告する。
-- 複数件なら停止して候補を報告し、URL指定を求める。
-- 状態が「定義済み」でない場合は停止して現在の状態を報告する。
+- Notion検索で候補を探さない
+- 指定URL以外のNotionページを読まない
 
 ## Notionの扱い
 
@@ -53,8 +42,6 @@ argument-hint: "[FページURLまたはF番号] [workflow] [implementer] [review
 - やらないこと
 - 必須検証
 - 実装に必要な未決事項
-
-F番号を記録し、Notion URLは記録しない。長い判断履歴や不要な経緯は除外する。
 
 ## current-task.mdへ入れない内容
 
@@ -134,8 +121,8 @@ workflow、実装AI、レビューAI、モデル、effortを推測しない。
 - Claude Codeの自動起動
 - Codexの起動
 - Notionへの書き込み
-- Iリストのバックログ以外のNotion検索
-- 該当Fページ以外のNotionページの読み取り
+- Notion検索
+- 他ページの読み取り
 - Web、MCP、外部通信
 - AGENTS.mdの変更
 - README.mdの変更
