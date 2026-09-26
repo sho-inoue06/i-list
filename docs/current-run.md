@@ -20,6 +20,7 @@
 
 ## Immutable
 
+- docs/current-task.md を変更しない
 - Preparation modeでの初回生成または空欄テンプレートの充填は許可する
 - 充填後はcurrent-run.mdを変更しない
 - Implementation modeとReview modeでは変更禁止
