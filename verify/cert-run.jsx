@@ -492,7 +492,8 @@ const SCENARIOS = [
       asserts.check("他のレコードは位置も値も変わらない",
         snap.cert.filter((x) => !(x.runKey === "r802" && x.rid === "g802")), V2.cert.filter((x) => !(x.runKey === "r801" && x.rid === "g801")));
       await openTab(c, "帳票");
-      asserts.check("帳票：r801×CR-REG-1 は赤・r802×CR-REG-1 は緑のまま", [borderOf(cellAt(c, 0, 0)), borderOf(cellAt(c, 0, 1))], [RED_RGB, GREEN_RGB]);
+      // F-23 B6：前ランの番号を消すと、空白だけの当ランも実績なしになる。
+      asserts.check("帳票：番号なし・空白だけは両ランとも赤", [borderOf(cellAt(c, 0, 0)), borderOf(cellAt(c, 0, 1))], [RED_RGB, RED_RGB]);
 
       // API版も同じ部品・同じ単位で編集し、PUTへ出る
       const m = installApiMock(API_V2);
