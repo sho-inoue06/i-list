@@ -328,7 +328,7 @@ export const isValidData = (d) => {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // YYYY-MM-DD を UTC 日付として解釈し、その日数値を返す（タイムゾーンに依存させないため）。
 // 形式が不正、または実在しない日付（例：2024-02-30）なら null。
-const dateDayNumber = (s) => {
+export const dateDayNumber = (s) => {
   if (typeof s !== "string" || !DATE_RE.test(s)) return null;
   const [y, m, d] = s.split("-").map(Number);
   const t = Date.UTC(y, m - 1, d);
@@ -418,7 +418,7 @@ export function deadlineOf(規制日, lo, today = TODAY) {
 }
 
 // 認可書番号から認証・予定の3状態へ。
-// 「予定あり」は取得予定（cert の planned）から作るもので、F-22では器だけ用意し判定には使わない（F-23）。
+// 単体版の「予定あり」と前例は standalone/cert-status.js が導出する（F-23）。API版は番号だけを使う。
 // したがってアプリ側からは "実績あり" か "実績なし+予定なし" の2つしか渡らない。
 export const certPlanOf = (ck) => (ck ? "実績あり" : "実績なし+予定なし");
 
@@ -440,8 +440,7 @@ export function effectiveSideOf(run, sameness) {
 // セル1つの業務状態。判定はこの関数だけが行う（F-19 C1）。
 //   handover … 「引き継ぎ確認中」（同じ型式の過去ランに実績があり、当プロジェクトの番号は空）。
 //     表示の枝分かれだけに効き、要否・期限・不適合・黄色予告には一切効かない。
-//     認証実績は F-22 で 型式ラン × 法規行 の器へ移したが、導出して表示するのは F-23 の範囲。
-//     アプリ側は常に false を渡し、見た目の確認は検証ハーネスのダミーで行う。
+//     単体版はF-23で前例から導出する。API版はfalseのまま。
 export function decideCell({
   lo = "", drop = "", shin = "", kei = "", today = TODAY,
   certPlan = "実績なし+予定なし", side = "新", 根拠未確認 = false, handover = false,
@@ -531,22 +530,27 @@ export function decideCell({
 // ここに項目を足すと、この戻り値を丸ごと比べている既存の検証が「中身は同じなのに落ちる」ためである。
 // 画面が使う決定表の出力は buildCellModel が同じ decideCell から作る（＝規則の実装は1つのまま）。
 // ───────────────────────────────────────────────
-// cert は型式ラン × 法規行の配列（F-22）。このランのこの法規行の管理番号だけを読む
+// API版の入力。cert は型式ラン × 法規行の配列（F-22）。このランのこの法規行の管理番号だけを読む
 // （同じ型式の別ランも、比較元の型式も読まない）。空白だけの番号は従来どおり「実績あり」（trimしない）。
 export const evalCellWith = (cert, run, r, sameness, today = TODAY) => {
-  const applied = sameness==="同一" ? "継続車日" : sameness==="同一でない" ? "新型車日" : "";
   const ck = findCert(cert, run.key, r.rid)?.ck || null;
+  return evalCellInputs(run, r, sameness, today, { ck, certPlan: certPlanOf(ck) });
+};
+
+// 決定表への入力を組み立てた後の共通評価。API版の入力は従来どおり、単体版はF-23で導出する。
+export function evalCellInputs(run, r, sameness, today, { ck, certPlan, handover = false }) {
+  const applied = sameness==="同一" ? "継続車日" : sameness==="同一でない" ? "新型車日" : "";
   const { side, 根拠未確認 } = effectiveSideOf(run, sameness);
   const d = decideCell({
     lo: run.lo, drop: run.drop, shin: r.shin, kei: r.kei, today,
-    certPlan: certPlanOf(ck), side, 根拠未確認,
+    certPlan, handover, side, 根拠未確認,
   });
   const required = d.要否 === "要";
   const kind = d.適用した規制 === "なし" ? "" : d.適用した規制;
   // "unknown" … 判定不能（LO未入力・F-24 A3）。否（"off"）とは区別する。
-  const status = d.表示 === "判定不能" ? "unknown" : !required ? "off" : ck ? "ok" : "leak";
+  const status = d.表示 === "判定不能" ? "unknown" : !required ? "off" : certPlan === "実績あり" ? "ok" : "leak";
   return { required, kind, ck, status, dueDate: d.規制日, applied };
-};
+}
 
 // ───────────────────────────────────────────────
 // 黄色の30日接近予告の窓（1〜30暦日）。決定表がこの窓を使う。
@@ -660,14 +664,14 @@ export function ComplianceStateText({ dueDate, drop, lo, decisionState, fontSize
   return <ComplianceLabel s={complianceStateOf({ dueDate, drop, lo, decisionState })} fontSize={fontSize} />;
 }
 
-// 帳票の集計（漏れ一覧と実効ドロップ）。判定は evalCellWith を使う。
+// 帳票の集計（漏れ一覧と実効ドロップ）。単体版は専用の入力評価を渡し、省略時はAPI版の評価を使う。
 // samenessFor(run, reg) は省略可（F-04の同一性。省略時は従来どおり）。
-export const summarize = (runs, regs, cert, samenessFor) => {
+export const summarize = (runs, regs, cert, samenessFor, evaluate) => {
   const leaks=[], effDrop={};
   for (const run of runs) {
     let earliest=null;
     for (const r of regs) {
-      const c = evalCellWith(cert, run, r, samenessFor ? samenessFor(run, r) : undefined);
+      const c = evaluate ? evaluate(run, r) : evalCellWith(cert, run, r, samenessFor ? samenessFor(run, r) : undefined);
       if (c.status==="leak") {
         // rid は人の適用判断（decisions）を引くための内部キー。法規ID(r.id)は空・重複がありうるので使わない。
         leaks.push({ run, reg:r.id, rid:r.rid, kind:c.kind, dueDate:c.dueDate });
@@ -1257,12 +1261,10 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
       const auto = evalCell(run, reg);
       // 決定表（F-19）の出力。evalCell が載せてくる＝ここで判定をやり直さない。
       // 画面はこの1つの結果から描く：要否も黄色予告も4状態も生産フェーズも、すべてここから出る。
-      // handover（引き継ぎ確認中）は、同じ型式の過去ランに実績があり当プロジェクトの番号が空、という状態。
-      // 認証実績は F-22 で 型式ラン × 法規行 の器へ移したが、この状態を導出するのは F-23 の範囲で、
-      // 評価関数は必ず false のままにしてある（F-22 B2）。表示の枝だけ先に用意しておく口である。
+      // 単体版はF-23の前例・取得予定から入力を導出する。API版は従来どおり番号だけを使う。
       const decision = decideCell({
         lo: run.lo, drop: run.drop, shin: reg.shin, kei: reg.kei, today,
-        certPlan: certPlanOf(auto.ck), handover: !!auto.handover,
+        certPlan: auto.certPlan ?? certPlanOf(auto.ck), handover: !!auto.handover,
         ...effectiveSideOf(run, sameCtx ? sameCtx.effective(run, reg) : null),
       });
       // 黄色の接近予告（窓＋F-15の過去分の除外＋実績なしのゲート）。決定表が「いいえ」なら null。
@@ -2480,12 +2482,12 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
 }
 
 // sameCtx / onSaveSameness は省略可能（F-04・単体版のみ）。省略時は同一性のUIを一切描画しない。
-export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, onSaveDecision, onRecheckRun, dataGen, columnFilter, sameCtx, onSaveSameness, basisCtx }) {
+export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, onSaveDecision, onRecheckRun, dataGen, columnFilter, sameCtx, onSaveSameness, basisCtx, onSetPlan }) {
   // セルの色と中身は、決定表（F-19）の出力「表示」1語だけで決まる（C4）。
   // status と notice から色をこねる形をやめたので、判定と見た目が食い違うことが起きない。
   // 人の適用判断はセルの色には一切関与しない（対象外を緑にしない・赤を消さない）。
   //   実績あり       … 濃い緑（認可書番号がある。従来の緑と同じ）
-  //   引き継ぎ確認中 … 薄い緑＋破線の緑枠（同じ型式の過去ランに実績あり・当プロジェクトの番号は空）
+  //   引き継ぎ確認中 … 薄い緑＋破線の緑枠（単体版では前例あり・このランの認可番号待ち）
   const CELL_STYLE = {
     "否":            { bg:"rgba(90,107,125,0.07)", bd:LINE,  fg:MUTE,  dash:false },
     "否・予告":       { bg:"rgba(224,178,77,0.14)", bd:AMBER, fg:AMBER, dash:false },
@@ -2654,13 +2656,22 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
                         <span style={{ fontFamily:"ui-monospace,monospace", fontSize:9, color:"#bfe9d8" }}>{c.ck}</span></>}
                       {disp==="引き継ぎ確認中" && <>
                         <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><ShieldCheck size={12}/><span style={{ fontSize:10.5, fontWeight:700 }}>{TEXT.cell.要}</span><Badge kind={c.kind}/></div>
-                        <span style={{ fontSize:9, color:st.fg, fontWeight:700 }}>{TEXT.cell.引き継ぎ確認中}</span>
-                        <span style={{ fontSize:9, color:"#8fa3b8" }}>同じ型式の過去の実績あり・このプロジェクトの番号は空</span></>}
+                        <span style={{ fontSize:9, color:st.fg, fontWeight:700 }}>{onSetPlan ? "実績あり（認可番号待ち）" : TEXT.cell.引き継ぎ確認中}</span>
+                        <span style={{ fontSize:9, color:"#8fa3b8" }}>{onSetPlan ? "この法規には前例あり・このランの認可番号は空" : "同じ型式の過去の実績あり・このプロジェクトの番号は空"}</span></>}
                       {disp==="申請発生" && <>
                         <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><AlertTriangle size={12}/><span style={{ fontSize:10.5, fontWeight:800 }}>{TEXT.cell.申請発生}</span><Badge kind={c.kind}/></div>
                         <ComplianceLabel s={m.compliance} /></>}
                       {disp==="判定不能" &&
                         <div style={{ display:"flex", alignItems:"center", gap:4, color:st.fg }}><HelpCircle size={12}/><span style={{ fontSize:10.5, fontWeight:700 }}>{TEXT.cell.判定不能}</span></div>}
+                      {onSetPlan && c.planVisible && <>
+                        <label style={{ display:"flex", alignItems:"center", gap:5, marginTop:4, fontSize:10, color:c.planned ? "#cdd9e5" : "#8fa3b8", cursor:c.canPlan || c.planned ? "pointer" : "default" }}>
+                          <input type="checkbox" aria-label={`取得予定 ${run.key} ${r.rid}`} checked={c.planned}
+                            disabled={!c.canPlan && !c.planned} style={{ margin:0, accentColor:CYAN }}
+                            onChange={(e)=>onSetPlan(run, r, e.target.checked)} />
+                          {c.planned ? "○ 取得予定" : "取得予定（○）"}
+                        </label>
+                        {!c.canPlan && <span style={{ fontSize:9, color:"#8fa3b8" }}>{c.planned ? "LO到来済み・予定の解除のみ可" : "LO到来済み・新たな予定は追加不可"}</span>}
+                      </>}
                       {m.decision.drop未定 && <div><DropUndecidedMark /></div>}
                       {showSame && !isEditingSame &&
                         <SamenessLine rec={sameRec} run={run} reg={r} base={base} auto={c} compliance={m.compliance}
@@ -2691,7 +2702,8 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
       </div>
       )}
       <div style={{ display:"flex", gap:16, marginTop:10, fontSize:10.5, color:MUTE, flexWrap:"wrap", alignItems:"center" }}>
-        <Leg c={GREEN} t="要・認可書あり（濃い緑）"/><Leg c={GREEN} t="要・引き継ぎ確認中（薄い緑・破線）"/>
+        <Leg c={GREEN} t="要・認可書あり（濃い緑）"/><Leg c={GREEN} t={onSetPlan ? "要・実績あり（認可番号待ち）（薄い緑・破線）" : "要・引き継ぎ確認中（薄い緑・破線）"}/>
+        {onSetPlan && <span style={{ color:"#8fa3b8" }}>○＝取得予定（実績には含めない）</span>}
         <Leg c={RED} t="要・実績なし＝申請発生"/><Leg c={MUTE} t="否＝対象外"/>
         <Leg c="#9d8cff" t="判定不能＝LOが未入力（破線）"/><Leg c={ORANGE} t="drop未定＝dropが空なので生産継続（drop＝∞）として判定"/>
         <Leg c={AMBER} t="否・ドロップ後30日以内にこれから継続規制＝要再確認"/>
@@ -3088,7 +3100,7 @@ function DecisionEditor({ run, reg, regs, dec, auto, notice, onSave, onCancel, d
   };
   const reconfirm = () => { if (!needReason()) onSave(confirmRec()); };
 
-  const autoText = auto.status==="ok" ? `要・認可書あり（${auto.ck}）`
+  const autoText = auto.handover && auto.status==="ok" ? "要・実績あり（認可番号待ち）" : auto.status==="ok" ? `要・認可書あり（${auto.ck}）`
     : auto.status==="leak" ? "要・実績なし＝申請発生"
     : auto.status==="unknown" ? TEXT.cell.判定不能
     : "否（日程上の適用対象外）";
