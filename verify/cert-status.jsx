@@ -25,7 +25,7 @@ const hasPrevious=(d)=>view(d).cell.auto.handover;
 const boot = (d) => { const p=parseImportedData(clone(d)); if(!p.ok) throw new Error(p.error); return {present:true,...p}; };
 const mount=async(d)=>{const c=document.createElement("div");document.getElementById("sandbox").append(c);const root=createRoot(c);root.render(<StandaloneApp bootData={boot(d)}/>);await sleep(70);return {c,close:()=>{root.unmount();c.remove();}};};
 const button=async(c,text)=>{[...c.querySelectorAll("button")].find(b=>b.textContent.includes(text)).click();await sleep(40);};
-const setInput=async(el,value)=>{const proto=el.tagName==="SELECT"?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,"value").set.call(el,value);el.dispatchEvent(new Event(el.tagName==="SELECT"?"change":"input",{bubbles:true}));await sleep(40);};
+const setInput=async(el,value)=>{const proto=el.tagName==="SELECT"?HTMLSelectElement.prototype:el.tagName==="TEXTAREA"?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,"value").set.call(el,value);el.dispatchEvent(new Event(el.tagName==="SELECT"?"change":"input",{bubbles:true}));await sleep(40);};
 const riskSignature=(v)=>v.risks.map(r=>({key:r.run.key,bad:r.bad,warn:r.warn,cells:r.cells.map(m=>({rid:m.reg.rid,risk:m.risk}))}));
 const checkbox=(c,key="r902",rid="g901")=>c.querySelector(`input[aria-label="取得予定 ${key} ${rid}"]`);
 const cell=(c,row=0,col=1)=>c.querySelector("table tbody").children[row].children[col+1];
@@ -60,7 +60,12 @@ async function verify(){
   const riskBefore=view(d).risks;d.cert=setCertPlanned(d.cert,"r902","g901",false);check("B5 危険一覧の行と件数は○の有無で同じ",view(d).risks,riskBefore);check("A6 ○なしは未計画",view(d).cell.decision.車両申請,"発生する（未計画）");
   d=data();d.cert=[record("r902","g901","",true)];
   for(const condition of ["precedent","lo","ck","excluded"]){let hidden=clone(d);if(condition==="precedent")hidden.cert.push(record("r901","g901","DUMMY*01"));if(condition==="lo")hidden.runs[1].lo="";if(condition==="ck")hidden.cert=setCertNumber(hidden.cert,"r902","g901"," DUMMY*02 ");if(condition==="excluded")hidden.decisions=[{runKey:"r902",rid:"g901",state:"対象外"}];
-    check(`A10 ${condition}で○を隠し保存値は保持`,[view(hidden).cell.auto.planVisible,hidden.cert.find(c=>c.runKey==="r902").planned],[false,true]);check(`A10 ${condition}の条件が戻ると○復帰`,view(d).cell.auto.planned,true);}
+    check(`A10 ${condition}で○を隠し保存値は保持`,[view(hidden).cell.auto.planVisible,hidden.cert.find(c=>c.runKey==="r902").planned],[false,true]);
+    if(condition==="precedent")hidden.cert=setCertNumber(hidden.cert,"r901","g901","");
+    if(condition==="lo")hidden.runs[1].lo=d.runs[1].lo;
+    if(condition==="ck")hidden.cert=setCertNumber(hidden.cert,"r902","g901","");
+    if(condition==="excluded")hidden.decisions=[{...hidden.decisions[0],state:"未確認"}];
+    check(`A10 ${condition}の条件を実際に戻すと○復帰`,view(hidden).cell.auto.planned,true);}
   d.cert=setCertNumber(d.cert,"r902","g901"," DUMMY*02 ");check("A9/B8 番号優先・trimは入力だけ",[view(d).cell.decision.表示,view(d).cell.auto.ck,d.cert[0].ck],["実績あり","DUMMY*02"," DUMMY*02 "]);
   check("B12 API版は空白・plannedを従来どおり扱う",[evalCellWith([record("r902","g901"," ",true)],d.runs[1],d.regs[0]).ck,evalCellWith([record("r902","g901","",true)],d.runs[1],d.regs[0]).status],[" ","leak"]);
   for(const kind of ["不適合","予告"]){
@@ -87,6 +92,46 @@ async function verify(){
     check("A10 条件変更後も保存予定を保持",(await snapshot(app.c)).cert.find(c=>c.runKey==="r902").planned,true);
   }finally{app.close();}
   d=data();d.decisions=[{runKey:"r902",rid:"g901",state:"対象外",reason:"ダミー理由",decidedAt:"2026-10-01 10:00",needsRecheck:false,cond:null}];app=await mount(d);try{const td=cell(app.c);check("A1/B11 待ちの色・破線・文言・人の行",[getComputedStyle(td.firstElementChild).borderTopStyle,getComputedStyle(td.firstElementChild).borderTopColor,td.textContent.includes("実績あり（認可番号待ち）"),td.textContent.includes("人：対象外"),td.textContent.includes("対象外（判断済み）"),!!checkbox(app.c)],["dashed","rgb(63, 191, 143)",true,true,false,false]);}finally{app.close();}
+  // レビュー指摘1（A1）：否のセルは判断編集を開いても否。要の待ち表示も保つ。
+  for(const required of [false,true]){
+    d=data();if(!required)d.regs[0]=reg("g901","DUMMY-REG",shift(200),shift(500));
+    app=await mount(d);try{
+      cell(app.c).querySelector('button[aria-label="適用判断・理由メモを編集"]').click();await sleep(40);
+      const text=cell(app.c).textContent;
+      check(`A1 判断編集の自動説明（${required?"要":"否"}）`,
+        [text.includes("自動：否（日程上の適用対象外）"),text.includes("自動：要・実績あり（認可番号待ち）")],[!required,required]);
+    }finally{app.close();}
+  }
+  // レビュー指摘2（A5）：空でない不正LOは保存済み○を見せる。追加は許可しない。
+  for(const lo of ["2026-02-30","2099-02-30","not-a-date"]){
+    d=data();d.runs[1].lo=lo;d.cert=[record("r902","g901","",true)];
+    const v=view(d).cell;
+    check(`A5 不正LO=${lo}でも保存予定を決定表へ渡す`,
+      [v.auto.planVisible,v.auto.planned,v.auto.canPlan,v.decision.車両申請],[true,true,false,"発生する（計画済み）"]);
+  }
+  d.runs[1].lo="2026-02-30";app=await mount(d);try{
+    const box=checkbox(app.c);
+    check("A5 JSON読込の不正LOでも○が見え・解除可能",[!!box,box?.checked,box?.disabled],[true,true,false]);
+    if(box){box.click();await sleep(40);check("A4/B7 不正LOの○を外すと再追加不可",checkbox(app.c).disabled,true);
+      check("A5 解除しても読込LOの値は変更しない",(await snapshot(app.c)).runs[1].lo,"2026-02-30");}
+  }finally{app.close();}
+  // A10：自分の番号と人の適用判断を実画面で変更し、○の復帰と保存値を照合。
+  d=data();d.cert=[record("r902","g901","",true)];app=await mount(d);try{
+    await button(app.c,"認可書実績");await setInput(app.c.querySelector('input[aria-label="認可書番号 r902 g901"]'),"DUMMY*OWN");await button(app.c,"帳票");
+    check("A9/A10 自分の番号で○を隠し実績を優先",[!!checkbox(app.c),cell(app.c).textContent.includes("DUMMY*OWN")],[false,true]);
+    check("A10 番号があっても予定の保存値を保持",(await snapshot(app.c)).cert.find(c=>c.runKey==="r902").planned,true);
+    await button(app.c,"認可書実績");await setInput(app.c.querySelector('input[aria-label="認可書番号 r902 g901"]'),"");await button(app.c,"帳票");
+    check("A10 自分の番号消去で○復帰",checkbox(app.c).checked,true);
+    cell(app.c).querySelector('button[aria-label="適用判断・理由メモを編集"]').click();await sleep(40);
+    [...cell(app.c).querySelectorAll('input[type="radio"]')].find(e=>e.parentElement.textContent.includes("対象外")).click();await sleep(40);
+    await setInput(cell(app.c).querySelector("textarea"),"ダミー：対象外の理由");await button(cell(app.c),"この判断で確定");
+    check("A10 対象外を確定すると○を隠す",!!checkbox(app.c),false);
+    check("A10 対象外でも予定の保存値を保持",(await snapshot(app.c)).cert.find(c=>c.runKey==="r902").planned,true);
+    cell(app.c).querySelector('button[aria-label="適用判断・理由メモを編集"]').click();await sleep(40);
+    [...cell(app.c).querySelectorAll('input[type="radio"]')].find(e=>e.parentElement.textContent.includes("未確認")).click();await sleep(40);await button(cell(app.c),"未確認に戻す");
+    check("A10 対象外から未確認へ戻すと○復帰",checkbox(app.c).checked,true);
+    const saved=await snapshot(app.c);const restored=await mount(saved);try{check("A8/A10 復帰した○を保存・再読込しても維持",checkbox(restored.c).checked,true);}finally{restored.close();}
+  }finally{app.close();}
 }
 // 確認用画面：濃緑、薄緑、○付き要、未計画、○付き否、LO済み、LO空。
 export const DEMO={schemaVersion:2,

@@ -3100,7 +3100,7 @@ function DecisionEditor({ run, reg, regs, dec, auto, notice, onSave, onCancel, d
   };
   const reconfirm = () => { if (!needReason()) onSave(confirmRec()); };
 
-  const autoText = auto.handover ? "要・実績あり（認可番号待ち）" : auto.status==="ok" ? `要・認可書あり（${auto.ck}）`
+  const autoText = auto.handover && auto.status==="ok" ? "要・実績あり（認可番号待ち）" : auto.status==="ok" ? `要・認可書あり（${auto.ck}）`
     : auto.status==="leak" ? "要・実績なし＝申請発生"
     : auto.status==="unknown" ? TEXT.cell.判定不能
     : "否（日程上の適用対象外）";

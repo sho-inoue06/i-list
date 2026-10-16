@@ -17,9 +17,10 @@ export function makeCertStatusContext(runs, cert, decisions, sameCtx, today = TO
         (base.state === "ok" && dateDayNumber(base.baseRun.lo) !== null &&
           dateDayNumber(base.baseRun.lo) <= lo && !!numberOf(cert, base.baseRun, reg))
       );
-      const planVisible = !ck && !precedent && lo !== null && findDecision(decIdx, run.key, reg.rid)?.state !== "対象外";
+      // 決定表は空のLOだけを判定不能とする。不正な非空LOでも保存済みの予定は見せ、解除できる。
+      const planVisible = !ck && !precedent && !!run.lo && findDecision(decIdx, run.key, reg.rid)?.state !== "対象外";
       const planned = planVisible && !!findCert(cert, run.key, reg.rid)?.planned;
-      const canPlan = planVisible && lo > dateDayNumber(today);
+      const canPlan = planVisible && lo !== null && lo > dateDayNumber(today);
       const certPlan = ck || precedent ? "実績あり" : planned ? "実績なし+予定あり" : "実績なし+予定なし";
       const handover = !ck && precedent;
       return { ...evalCellInputs(run, reg, sameCtx.effective(run, reg), today, { ck, certPlan, handover }),
