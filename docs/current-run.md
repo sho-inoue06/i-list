@@ -3,20 +3,20 @@
 実装開始前に凍結する実行契約。進行状態のログではない。
 実装AI・レビューAIはこのファイルを変更しない。
 
-- Task:
-- Workflow:
-- Implementer:
-- Reviewer:
-- Reviewer model:
-- Reviewer effort:
-- Review invocation:
-- Review rounds:
-- Fix rounds:
+- Task: F-23（docs/current-task.md）
+- Workflow: visual-first
+- Implementer: Codex
+- Reviewer: Claude Code
+- Reviewer model: claude-opus-5-5
+- Reviewer effort: high
+- Review invocation: docs/claude-review.md の起動形（読み取り専用、Readのみ）。`--effort` は high を指定する
+- Review rounds: 1
+- Fix rounds: 1
 
 ## Gates
 
-1.
-2.
+1. 停止①（方向性確認）：実装→セルフ検証の後に停止し、色分け・○の入力UIなどの見せ方を人が確認する。方向性が否定されたらレビューへ進まない
+2. 停止②（最終確認）：レビュー→指摘修正1回→再検証の後に停止し、人が最終確認する。pushは別承認
 
 ## Immutable
 
