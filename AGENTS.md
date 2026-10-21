@@ -33,6 +33,7 @@
 - 報告は [docs/procedures/implement.md](docs/procedures/implement.md) の「最終報告の形式」に従い、実装したことと検証できたことを分けて書く。
 - `docs/current-task.md` は凍結された今回の実行仕様（WHAT）で、進捗や現在地を書き込まない。履歴はgit historyに残す。同じ内容のログや管理ファイルを増やさない。
 - 前提崩れ、安全性、データ破壊、情報持ち出し、権限の疑い：修正もバックログ候補化もせず、停止して報告する。
+- 新しい問題を見つけても、現在の範囲へ勝手に追加しない。独立した別案件の報告が1セッション3件を超えたら、成果単位が大きすぎる可能性を報告して停止する。現在のFが完了するまで、Define・採番・着手順の決定を始めない。
 
 ## ファイルの責務と不変ルール
 
@@ -61,7 +62,9 @@
 - ユーザーがClaude Codeで `/prepare-f` を明示起動したときだけ許可する。
 - 指定されたNotion Fページ1件だけを読み取り可能とする。Notion検索、他ページの読み取り、Notion書き込みは禁止する。
 - 実装、レビュー、テストは禁止する。
+- `git fetch origin` は、branch作成とやり直し判定のためにだけ実行してよい。
 - Web検索・Web取得、Notion以外のMCP、Claude Code・Codexの起動は行わない。
+- Notion URLを `docs/current-task.md` へ書かない。
 - 指定Fページ、実装AI、レビューAIのいずれかが未指定の場合は停止する。
 
 ### 実装
@@ -100,6 +103,5 @@
 
 - 1セッションにつき1成果単位とする。1成果単位＝1branch。branchを切るのは準備セッションだけ。前の作業branchの上に、別の成果を積まない。
 - branch名は次を基本とする：機能 `feat/f-xx`、進め方・基盤 `chore/内容`、記録整理 `docs/内容`。
-- 着手時に、現在のbranch、HEAD、未コミット差分、mainとの差を確認する。
 - 実装セッションは、`docs/current-run.md` のTaskに対応するbranchでない、または仕様凍結commitが無い場合は着手せず停止する。
 - mainへのマージ方式はsquashを基本とし、1成果単位をmain上の1commitにする。

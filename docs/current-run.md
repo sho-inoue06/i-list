@@ -14,7 +14,7 @@
 
 - docs/current-task.md を変更しない
 - Preparation modeでの初回生成または空欄テンプレートの充填は許可する
-- 充填後はcurrent-run.mdを変更しない
+- 充填後はcurrent-run.mdを変更しない。ただし凍結commit前に限り、準備セッションのやり直しモード（.claude/skills/prepare-f/SKILL.md の 2-3）で空欄テンプレートへ戻して再生成できる
 - Implementation modeとReview modeでは変更禁止
 - workflow、実装AI、レビューAI、停止点、回数を自己判断で変更しない
 - 仕様変更が必要なら実装を停止し、Notion更新後に/prepare-fを再実行する

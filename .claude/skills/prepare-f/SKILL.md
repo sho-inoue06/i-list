@@ -61,7 +61,7 @@ argument-hint: "[FページURL] [implementer] [reviewer]"
 
 - 現在そのbranchにいる（`git branch --show-current` が `<branch>`）
 - origin/main より先のcommitが0件（`git rev-list --count origin/main..HEAD` が 0）
-- 未コミット差分が docs/current-task.md と docs/current-run.md だけ（`git status --porcelain` に他のパスが1件も無い。stage済みの差分も含めて見る）
+- 未コミット差分が docs/current-task.md と docs/current-run.md だけ（`git status --porcelain` に、この2ファイル以外のパスが1件も無い。stage済み・未追跡も含めて見る。2ファイルの差分が片方だけ・0件の場合も、他のパスが無ければ満たすとみなす）
 
 満たした場合は、2ファイルを空欄テンプレートへ戻してから 3 へ進む。branchは作らない。
 
@@ -162,7 +162,7 @@ Notionの内容をそのまま外部AIへ渡さず、実行に必要な情報だ
 
 - docs/current-task.md を変更しない
 - Preparation modeでの初回生成または空欄テンプレートの充填は許可する
-- 充填後はcurrent-run.mdを変更しない
+- 充填後はcurrent-run.mdを変更しない。ただし凍結commit前に限り、準備セッションのやり直しモード（.claude/skills/prepare-f/SKILL.md の 2-3）で空欄テンプレートへ戻して再生成できる
 - Implementation modeとReview modeでは変更禁止
 - workflow、実装AI、レビューAI、停止点、回数を自己判断で変更しない
 - 仕様変更が必要なら実装を停止し、Notion更新後に/prepare-fを再実行する
