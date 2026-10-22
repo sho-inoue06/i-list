@@ -20,6 +20,6 @@
 1. `git push -u origin <branch>`
 2. `gh pr create --base main --head <branch>`（本文は最終報告の要約）
 3. PRが mergeable で、base が main、head の SHA が承認時のHEADと一致することを確認する。コンフリクト・base違い・SHA不一致・チェック失敗のどれかがあれば、マージせず停止する
-4. `gh pr merge --squash --delete-branch`
+4. `gh pr merge --squash --delete-branch --match-head-commit <承認時のHEAD>`（確認後にheadが動いていたらマージされない。失敗したら停止する）
 5. `git switch main` → `git pull --ff-only origin main`。ff-onlyで失敗したら停止する（競合は解消しない）
 6. マージcommitのhash、PR番号、ローカルmainのHEADを報告する
