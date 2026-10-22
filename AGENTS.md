@@ -66,6 +66,7 @@
 - `git fetch origin` は、branch作成とやり直し判定のためにだけ実行してよい。
 - Web検索・Web取得、Notion以外のMCP、Claude Code・Codexの起動は行わない。
 - Notion URLを `docs/current-task.md` へ書かない。
+- SKILL.md 2-3 のやり直しモードで2ファイルを空欄テンプレートへ戻すことは、祥がやり直しを指示したことをもって承認とする。2ファイル以外は戻さない。
 - 指定Fページ、実装AI、レビューAIのいずれかが未指定の場合は停止する。
 
 ### 実装
@@ -73,7 +74,7 @@
 - Notionの読み取り・書き込み・検索は禁止する。
 - `AGENTS.md`、`docs/current-task.md`、`docs/current-run.md`、手順ファイル、必要なコードだけを読む。
 - `current-task.md` と `current-run.md` を変更しない。
-- 実装AIは指定されたworkflowの範囲だけを実行する。
+- 実装AIは docs/procedures/implement.md の standard の範囲だけを実行する。exploration は祥が明示したときだけ。
 - 仕様、完成条件、やらないことを自分で変更しない。
 
 ### レビュー
@@ -106,5 +107,6 @@
 - branch名は次を基本とする：機能 `feat/f-xx`、進め方・基盤 `chore/内容`、記録整理 `docs/内容`。
 - Fの実装セッションは、`docs/current-run.md` のTaskに対応するbranchでない、または仕様凍結commitが無い場合は着手せず停止する。この確認はFの実装セッションにだけ適用する。
 - Fでない作業（chore・docs）は `/prepare-f` を使わない。この場合に限り、作業セッションが開始時に branch を1本作ってよい。手順と止まる条件は準備セッションと同じ（未コミット差分なし → `git fetch origin` → `git switch -c <branch> origin/main`。未コミット差分がある、または同名branchがあれば停止）。
+- chore・docs では `docs/current-task.md`・`docs/current-run.md` を読まず、依頼文を仕様とする。冒頭の「実装前に必ず docs/current-task.md を読む」「docs/current-task.md が存在しない場合は停止」と、「ファイルの責務と不変ルール」の両ファイルを読む規定は、Fの作業にだけ適用する。
 - chore・docs の作業セッションは、依頼文で指定された branch 名で作業していることだけを確認する。
 - mainへのマージ方式はsquashを基本とし、1成果単位をmain上の1commitにする。

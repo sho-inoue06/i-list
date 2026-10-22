@@ -7,9 +7,6 @@
 ## Workflowの選択
 
 - 固定の実装・停止・レビュー順序を`AGENTS.md`の正本にしない。
-- 今回の進行方法は`docs/current-run.md`で指定する。
-- workflowの詳細は`docs/procedures/implement.md`を読む。
-- `current-run.md`が指定していないworkflowを推測しない。
 
 ## standard
 
