@@ -1,5 +1,14 @@
 # AGENTS.md — Iリスト 開発ルール（要約）
 
+このファイルは禁止と境界だけを持つ。手順（工程の順序・観点・報告形式）は「手順の索引」に挙げたファイルに置く。
+
+## 優先順位
+
+- 手順ファイル・skill・current-run.md はこのファイルの境界を緩めない。矛盾したらこのファイルを優先して停止する。
+- `AGENTS.md`の安全境界をworkflowやSkillで緩和しない。
+
+## 共通の禁止と境界
+
 - 実装前に必ず [docs/current-task.md](docs/current-task.md) を読む。
 - `docs/current-task.md`が存在しない場合は、実装を開始せず停止する。`docs/current-task-legacy-2026-09.md`を代用せず、`/prepare-f`で実行仕様が生成されるまで待つ。
 - Notion「Iリスト｜仕様・開発方針」を仕様・判断理由の正本とする。開発ルールの正本はこのファイルで、Notionには写さない。読んでいない内容を読んだと報告しない。
@@ -21,135 +30,83 @@
 - 「参照元に実績がある」ことは「このrepoで適合確認済み」を意味しない。移植後は都度検証する。
 - 依存パッケージ・権限・セキュリティ設定を無断で変更しない（追加・更新・緩和いずれも不可）。
 - LAN公開・トンネル・外部公開はしない。ローカル（127.0.0.1）限定。
-- 報告は下の「最終報告の形式」に従い、実装したことと検証できたことを分けて書く。
+- 報告は [docs/procedures/implement.md](docs/procedures/implement.md) の「最終報告の形式」に従い、実装したことと検証できたことを分けて書く。
 - `docs/current-task.md` は凍結された今回の実行仕様（WHAT）で、進捗や現在地を書き込まない。履歴はgit historyに残す。同じ内容のログや管理ファイルを増やさない。
+- 前提崩れ、安全性、データ破壊、情報持ち出し、権限の疑い：修正もバックログ候補化もせず、停止して報告する。
+- 新しい問題を見つけても、現在の範囲へ勝手に追加しない。独立した別案件の報告が1セッション3件を超えたら、成果単位が大きすぎる可能性を報告して停止する。現在のFが完了するまで、Define・採番・着手順の決定を始めない。
 
 ## ファイルの責務と不変ルール
 
 - `AGENTS.md`：全成果に共通する安全境界と不変ルール。
 - `docs/current-task.md`：今回のFのWHAT（目的、対象範囲、完成条件、やらないこと、必須検証）。
-- `docs/current-run.md`：今回のHOW（workflow、実装AI、レビューAI、モデル、停止点、回数）。実行開始前に凍結する契約であり、進行状態のログではない。
-- `docs/workflow-profiles.md`：選択可能なループの定義。
+- `docs/current-run.md`：今回のHOW（実装AI、レビューAI、モデル、推論強度、手順ファイル）。実行開始前に凍結する契約であり、進行状態のログではない。
+- `docs/procedures/`：セッションごとの手順（下の「手順の索引」）。
 - `docs/codex-review.md`：Codexレビューの起動設定。
 - `docs/claude-review.md`：Claude Codeレビューの起動設定。
 
 実装セッションとレビューセッションは、`docs/current-task.md` と `docs/current-run.md` を読む。実装AI・レビューAIは両ファイルを変更しない。内容が不足、矛盾、または機密混入している場合は着手せず停止する。仕様変更が必要な場合は実装を停止し、Notion更新後に準備Skillで再生成する。
 
-## セッションモード
+## セッションごとの境界
 
-### Preparation mode
+| セッション | Notion | 書いてよいもの | Git |
+|---|---|---|---|
+| 準備（`/prepare-f`） | 指定Fページ1件の読み取りのみ | `docs/current-task.md`・`docs/current-run.md` のみ | 開始時のbranch作成1回と、祥の明示承認後の凍結commit1回（2ファイルだけ）。pushは承認があっても禁止 |
+| 事前点検（祥の指示） | 禁止 | 無し | 変更禁止 |
+| 実装（`docs/current-run.md`） | 禁止 | コード（`docs/current-task.md`・`docs/current-run.md` は不可） | branchの作成・切り替え禁止。commitは上のGit運用ルールどおり、pushは明示承認 |
+| レビュー | 禁止 | 無し | 変更禁止 |
+
+- 実装AIとレビューAIを同一セッションにしない。
+- 実装の行の「branchの作成・切り替え禁止」の例外は、「セッションと成果単位」に書いたFでない作業（chore・docs）の開始時のbranch作成1本だけ。
+
+### 準備
 
 - ユーザーがClaude Codeで `/prepare-f` を明示起動したときだけ許可する。
 - 指定されたNotion Fページ1件だけを読み取り可能とする。Notion検索、他ページの読み取り、Notion書き込みは禁止する。
-- `docs/current-task.md` と `docs/current-run.md` の生成だけを許可する。
-- 実装、レビュー、テスト、commit、pushは禁止する。
-- 指定Fページ、workflow、実装AI、レビューAIのいずれかが未指定の場合は停止する。
+- 実装、レビュー、テストは禁止する。
+- `git fetch origin` は、branch作成とやり直し判定のためにだけ実行してよい。
+- Web検索・Web取得、Notion以外のMCP、Claude Code・Codexの起動は行わない。
+- Notion URLを `docs/current-task.md` へ書かない。
+- SKILL.md 2-3 のやり直しモードで2ファイルを空欄テンプレートへ戻すことは、祥がやり直しを指示したことをもって承認とする。2ファイル以外は戻さない。
+- 指定Fページ、実装AI、レビューAIのいずれかが未指定の場合は停止する。
 
-### Implementation mode
+### 実装
 
 - Notionの読み取り・書き込み・検索は禁止する。
-- `AGENTS.md`、`docs/current-task.md`、`docs/current-run.md`、必要なコードだけを読む。
+- `AGENTS.md`、`docs/current-task.md`、`docs/current-run.md`、手順ファイル、必要なコードだけを読む。
 - `current-task.md` と `current-run.md` を変更しない。
-- 実装AIは指定されたworkflowの範囲だけを実行する。
+- 実装AIは docs/procedures/implement.md の standard の範囲だけを実行する。exploration は祥が明示したときだけ。
 - 仕様、完成条件、やらないことを自分で変更しない。
 
-### Review mode
+### レビュー
 
 - Notionの読み取り・書き込み・検索は禁止する。
 - 実装AIとは別系統・別セッションでレビューする。
-- コード、`current-task.md`、`current-run.md`、必要な設定だけを読む。
+- コード、`current-task.md`、`current-run.md`、手順ファイル、必要な設定だけを読む。
 - コード、Git状態、`current-task.md`、`current-run.md` を変更しない。
-- 指定された完成条件を基準に、条件番号または再現手順付きで指摘する。
-- 命名、整形、無関係なリファクタリング、性能改善は指摘しない。
-
-## Workflowの選択
-
-- 固定の実装・停止・レビュー順序を`AGENTS.md`の正本にしない。
-- 今回の進行方法は`docs/current-run.md`で指定する。
-- workflowの詳細は`docs/workflow-profiles.md`を読む。
-- `current-run.md`が指定していないworkflowを推測しない。
-- `AGENTS.md`の安全境界をworkflowやSkillで緩和しない。
-
-## レビューAIの組み合わせ
-
-- Claude Code実装時のレビュー候補：Codex。
-- Codex実装時のレビュー候補：Claude Code。
-- 実装AIとレビューAIを同一セッションにしない。
+- レビューAIは読み取り専用。書き込まない。
+- モデルと推論強度は各設定ファイルの値から変えない。変える必要が生じた場合は、実行前に祥へ理由を報告して確認する。
 - レビュー起動は、`current-run.md`で指定され、必要な承認が得られた場合だけ行う。
 - CodexからClaude Codeを起動する場合、`docs/claude-review.md`の読み取り専用条件に従う。
 - Codex全体のdanger-full-access化、認証情報の受け渡し、OAuthトークンの環境変数設定は禁止する。
 
-## 移行中の注意
+## 手順の索引
 
-- 旧1,037行の内容は`docs/current-task-legacy-2026-09.md`に退避した。
-- `docs/current-task.md`は、次のFを`/prepare-f`で準備するまで存在しない。
-- `docs/current-task.md`がない状態では、実装を開始せず停止する。
-- 実際のFを準備するまで、`current-task.md`を手作業で作らない。
-- `docs/current-task-legacy-2026-09.md`を実装仕様として読まない。
-- 今回の`AGENTS.md`編集では`current-task.md`の内容を変更しない。
+- 着手前に自分のセッションの手順ファイルを読む。見つからなければ停止する。
+- 報告の1行目に「読んだ手順：<パス>（版：<版>）」を書く。
 
-## レビュー
-- 起動方法・コマンド・バージョン・モデル・推論強度は、レビューAIごとの設定（docs/codex-review.md／docs/claude-review.md）を参照する。ここには書かない。
-- レビューAIは読み取り専用。書き込まない。
-- モデルと推論強度は各設定ファイルの値から変えない。変える必要が生じた場合は、実行前に祥へ理由を報告して確認する。
-
-
-レビューで見るもの：
-- 完成条件ごとの実装漏れ。指摘には条件番号を付ける
-- 既存データの破壊と後方互換性
-- 保存→復元の往復で失われる情報
-- 空、欠損、不正値、重複などの境界値
-- エラー時の挙動
-- 仕様と実装動作のズレ
-- 「やらないこと」への副作用
-
-レビューで見ないもの：命名、整形、リファクタ提案、性能の細かい改善。
-
-条件番号も再現手順もない指摘は修正しない。最終報告の「修正しなかった指摘」に列挙するだけにする。
-
-
-
-## 見つけたもの
-新しい問題を見つけたら、現在の範囲へ勝手に追加せず、現在のFとの関係で次のどれかに振り分ける。
-
-- 現在の完成条件に必要：条件番号または再現手順を付けて、現在のFの中で扱う。
-- 前提崩れ、安全性、データ破壊、情報持ち出し、権限の疑い：修正もバックログ候補化もせず、停止して報告する。
-- 独立して価値がある別案件：現在のFを止めず報告する。停止①・停止②・最終報告のいずれでも下のブロックを1案件1つ、1セッション最大3件。超えたら成果単位が大きすぎる可能性を報告して停止する。F番号・優先順位・完成条件・解決策は決めず、解決策ではなく「〜のとき、〜になる」と観測事実で書く。既存バックログへの追記か新規候補かはAI1が重複確認して判断する。現在のFが完了するまで、Define・採番・着手順の決定を始めない。
-- 感想、命名、整形、細かい性能改善：バックログ候補にせず、最終報告に残すだけにする。
-
-```
-[NOTION_BACKLOG_CANDIDATE]
-発見元：F-xx／停止①・停止②
-作業名：
-観測した事実：
-再現手順・関連する完成条件：
-影響範囲：
-現在のFを止めるか：はい／いいえ（理由）
-既に決まったこと：
-未決事項：
-[/NOTION_BACKLOG_CANDIDATE]
-```
-
-## 最終報告の形式
-最終報告の形式と停止点は、選択したworkflowと`docs/current-run.md`に従う。standardはworkflowで定義されたレビュー・修正・再検証・人間確認を報告し、visual-firstは方向性確認と最終確認を区別して報告する。explorationはレビュー・commit・pushを行わないことを報告する。pushはworkflowと`current-run.md`で許可されている場合だけ、別承認後に行う。
-- 最終報告（最後の停止点からpushまで完了した後）は、それ単体で経緯と結果が分かる自己完結した内容にする。祥は最終報告だけをAI1へ渡し、Notionへの反映を依頼する。途中報告をNotion向けに別途作らない。
-
-0. 引き渡し情報：成果番号、branch、HEAD、push先
-1. 変更したもの
-2. 完成条件ごとの確認状況
-3. 実行した検証と結果
-4. 未検証事項
-5. レビュー
-6. 見つけたもの
-7. 安全性チェック：ダミーのみ／秘密情報なし／依存・権限の無断変更なし／外部公開なし／既存データ破壊なし／範囲外ファイル変更なし を各1行で確認
-8. 祥が次に行う操作
-9. 祥またはAI1に判断してほしいこと
+| セッション | 手順ファイル |
+|---|---|
+| 準備 | [.claude/skills/prepare-f/SKILL.md](.claude/skills/prepare-f/SKILL.md) |
+| 事前点検 | [docs/procedures/precheck.md](docs/procedures/precheck.md) |
+| 実装 | [docs/procedures/implement.md](docs/procedures/implement.md) |
+| レビュー | [docs/procedures/review.md](docs/procedures/review.md) |
 
 ## セッションと成果単位
-- 1セッションにつき1成果単位とする。1成果単位ごとに、最新のmainから新しいbranchを切る。前の作業branchの上に、別の成果を積まない。
+
+- 1セッションにつき1成果単位とする。1成果単位＝1branch。branchを切るのは準備セッションだけ（Fでない作業の例外は下記）。前の作業branchの上に、別の成果を積まない。
 - branch名は次を基本とする：機能 `feat/f-xx`、進め方・基盤 `chore/内容`、記録整理 `docs/内容`。
-- 着手時に、現在のbranch、HEAD、未コミット差分、mainとの差を確認する。
-- 選択したworkflowの終了条件を満たし、必要な人間確認を終えたらセッションを終了する。explorationではpushを終了条件にせず、pushを行わずに終了するworkflowを許可する。workflowにない追加作業を推測して実行しない。
-- 自分が書いたコードの不具合修正は同一成果単位なので、同じセッションで行う。
-- 完成条件や前提の変更が必要になった場合は、現在のセッションを停止し、条件更新後に新しいセッションで再開する。
+- Fの実装セッションは、`docs/current-run.md` のTaskに対応するbranchでない、または仕様凍結commitが無い場合は着手せず停止する。この確認はFの実装セッションにだけ適用する。
+- Fでない作業（chore・docs）は `/prepare-f` を使わない。この場合に限り、作業セッションが開始時に branch を1本作ってよい。手順と止まる条件は準備セッションと同じ（未コミット差分なし → `git fetch origin` → `git switch -c <branch> origin/main`。未コミット差分がある、または同名branchがあれば停止）。
+- chore・docs では `docs/current-task.md`・`docs/current-run.md` を読まず、依頼文を仕様とする。冒頭の「実装前に必ず docs/current-task.md を読む」「docs/current-task.md が存在しない場合は停止」と、「ファイルの責務と不変ルール」の両ファイルを読む規定は、Fの作業にだけ適用する。このファイルと手順ファイルで `docs/current-run.md` の指定・許可とされている事項（レビュー担当・モデル・推論強度・レビュー起動・push）は、chore・docs では依頼文の指定と読み替える。Git運用ルールの明示承認は読み替えない。
+- chore・docs の作業セッションは、依頼文で指定された branch 名で作業していることだけを確認する。
 - mainへのマージ方式はsquashを基本とし、1成果単位をmain上の1commitにする。
