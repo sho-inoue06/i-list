@@ -286,7 +286,7 @@ const ABSOLUTE_DUMMY = {
 // その入力を分ける dropInputStateOf（F-24）。状態の値は **製品がexportする定義** から取り、
 // 検証側に状態名を書き写さない。定義に値が増えれば、ここで数える状態も自動で増える。
 //   ・値の一覧を定数で持つ出力 … その定数の値すべて
-//   ・はい／いいえの出力       … 「はい」のセルがあること（出力の型から自動で拾う）
+//   ・はい／いいえの出力       … 「はい」「いいえ」のセルがどちらもあること（出力の型から自動で拾う）
 //   ・状態ではない出力         … 下の NOT_STATE_KEYS に理由つきで列挙したものだけ
 // どれにも当たらない出力の項目が増えたら、それ自体をFAILにする（数え漏れを黙って通さない）。
 // 画面の4状態（complianceOfDecision）は決定表の読み替えで判定をしない（F-14 の注記）ので、ここでは数えない。
@@ -318,7 +318,7 @@ function stateDefinitions(outputs, axes = VALUE_AXES, inputStates = DROP_INPUT_S
     if (typeof v === "boolean") booleans.add(k); else unclassified.add(k);
   }
   for (const [axis, values] of Object.entries(axes)) for (const value of values) defs.push({ axis, value });
-  for (const axis of booleans) defs.push({ axis, value: true });
+  for (const axis of booleans) for (const value of [true, false]) defs.push({ axis, value });
   for (const value of inputStates) defs.push({ axis: INPUT_AXIS, value });
   return { defs, unclassified: [...unclassified].sort() };
 }
@@ -661,7 +661,7 @@ const SCENARIOS = [
   {
     id: "F25-counter",
     name: "対照実験：状態が0件になったとき・定義に状態が増えたときに、網羅の確認が落ちる",
-    expect: "過去に法規不適合を消した写し・判定不能を消した写し・drop未定を消した写しは、その状態が0件として出る。定義の一覧に値を足すと、その値が0件として出る。分類していない出力項目が増えると出る",
+    expect: "過去に法規不適合を消した写し・判定不能を消した写し・drop未定を消した写しは、その状態が0件として出る。定義の一覧に値を足すと、その値が0件として出る。はい／いいえの出力は、はい・いいえのどちらが0件でも出る。分類していない出力項目が増えると出る",
     async run({ asserts }) {
       const d1 = clone(SEED);
       setTypeCk(d1, "DEMO-0002", "DEMO-REG-B", "DEMO*B00/00*99");
@@ -679,7 +679,12 @@ const SCENARIOS = [
       asserts.check("入力状態の定義が増えると落ちる",
         stateCounts(cells, { inputStates: [...DROP_INPUT_STATES, "ダミーの新しい入力状態"] }).missing, [`${INPUT_AXIS}=ダミーの新しい入力状態`]);
       const withNewFlag = cells.map((m) => ({ ...m, decision: { ...m.decision, ダミーの新しい判定: false } }));
-      asserts.check("はい／いいえの出力が増えて初期データに無いと落ちる", stateCounts(withNewFlag).missing, ["ダミーの新しい判定=true"]);
+      asserts.check("はい／いいえの出力が増えて「はい」が初期データに無いと落ちる", stateCounts(withNewFlag).missing, ["ダミーの新しい判定=true"]);
+      // レビュー指摘（条件3）：「いいえ」側が0件になっても落ちる
+      const allTrue = cells.map((m) => ({ ...m, decision: { ...m.decision, ダミーの新しい判定: true } }));
+      asserts.check("はい／いいえの出力で「いいえ」が初期データに無いと落ちる", stateCounts(allTrue).missing, ["ダミーの新しい判定=false"]);
+      const noPastFalse = cells.map((m) => ({ ...m, decision: { ...m.decision, 過去に法規不適合: true } }));
+      asserts.checkTrue("既存の出力でも「いいえ」が0件なら落ちる", stateCounts(noPastFalse).missing.includes("過去に法規不適合=false"));
       const withNewKey = cells.map((m) => ({ ...m, decision: { ...m.decision, ダミーの新しい区分: "x" } }));
       asserts.check("分類していない出力項目が増えると落ちる", stateCounts(withNewKey).unclassified, ["ダミーの新しい区分"]);
       asserts.check("写したままなら0件なし", stateCounts(standaloneCells(clone(SEED))).missing, []);
