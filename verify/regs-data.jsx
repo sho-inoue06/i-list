@@ -637,20 +637,21 @@ const SCENARIOS = [
   {
     id: "S-seed-demo",
     name: "単体版の初期表示（SEED）が検討用の各ケースを出す",
-    expect: "SEEDは検証を通り、開いた直後は『変更なし』。000Bで型式追加、000Cで同一でない・認可番号待ち、LO≥継続車日、001Aで初回回答と未確認に戻した要再確認が見える。新型車日がLOより後のセルには同一性を出さない",
+    expect: "SEEDは検証を通り、開いた直後は『変更なし』。000Cで同一（継続車日で否）・同一でない・認可番号待ち、LO≥継続車日、001Aで初回回答と未確認に戻した要再確認が見える。新型車日がLOより後のセルには同一性を出さない",
     async run({ mount, asserts }) {
       const p = parseImportedData(clone(SEED));
       asserts.check("SEEDはそのまま読込検証を通る", p.ok, true);
       asserts.check("掃き出しで変わらない", sweepSameness(SEED.sameness, SEED.runs, SEED.regs, SEED.bases) === SEED.sameness, true);
-      asserts.check("プロジェクトコード", [...new Set(SEED.runs.map((r) => r.gen))], ["000A", "000B", "000C", "001A"]);
-      asserts.check("型式追加のあるプロジェクト（複数型式）", ["000B", "000C", "001A"].map((g) => new Set(SEED.runs.filter((r) => r.gen === g).map((r) => r.typeId)).size), [2, 2, 2]);
+      asserts.check("プロジェクトコード", [...new Set(SEED.runs.map((r) => r.gen))], ["000A", "000B", "000C", "001A", "001B"]);
+      asserts.check("型式追加のあるプロジェクト（複数型式）", ["000B", "000C", "001A", "001B"].map((g) => new Set(SEED.runs.filter((r) => r.gen === g).map((r) => r.typeId)).size), [2, 3, 2, 2]);
       const c = mount(undefined).container;
       await sleep(80);
       asserts.checkTrue("開いた直後は変更なし", c.textContent.includes("変更なし（未書き出しの変更はありません）"));
       const at = (col, row) => cellAt(c, row, col).textContent;
-      // 列：r1..r7 = 0..6、行：A,A2,B,C,D,E = 0..5
-      asserts.checkTrue("r3×B 同一→継続車日で否", at(2, 2).includes("継続車日を適用") && at(2, 2).includes("否"));
-      // F-23 A2：同じLOの比較元r4に番号がある。同一性の回答は前例の有無に関与しない。
+      // 列：r1..r10 = 0..9、行：A,A2,B,C,D,E = 0..5
+      // F-25：同一の例は r3×B から r8×A2 へ移した（r3×B は過去に法規不適合の例になった）
+      asserts.checkTrue("r8×A2 同一→継続車日で否", at(7, 1).includes("継続車日を適用") && at(7, 1).includes("否"));
+      // F-23 A2：LOがr5以前の比較元r4に番号がある。同一性の回答は前例の有無に関与しない。
       asserts.checkTrue("r5×B 同一でない・比較元の前例から認可番号待ち",
         at(4, 2).includes("新型車日を適用") && at(4, 2).includes("実績あり（認可番号待ち）") && !at(4, 2).includes("過去に法規不適合"));
       asserts.checkTrue("r5×D LO≥継続車日：要再確認なし・実績あり", !at(4, 4).includes("要再確認") && at(4, 4).includes("DEMO*D00/00*02"));

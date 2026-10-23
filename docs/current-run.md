@@ -3,11 +3,11 @@
 実装開始前に凍結する実行契約。進行状態のログではない。
 実装AI・レビューAIはこのファイルを変更しない。
 
-- Task:
-- Implementer:
-- Reviewer:
-- Reviewer model:
-- Reviewer effort:
+- Task: F-25（docs/current-task.md）
+- Implementer: Claude Code
+- Reviewer: Codex
+- Reviewer model: gpt-6-astra（GPT-6 Astra）
+- Reviewer effort: high
 - Procedure: docs/procedures/implement.md
 
 ## Immutable
