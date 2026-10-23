@@ -36,7 +36,7 @@ const STORED = {
 };
 
 // IListApp の SEED（空応答時にPUTされる期待本文の検証に使う。実データではない）
-const EXPECTED_SEED_TYPE_IDS = ["DEMO-0001", "DEMO-0002", "DEMO-0003", "DEMO-0004"];
+const EXPECTED_SEED_TYPE_IDS = ["DEMO-0001", "DEMO-0002", "DEMO-0003", "DEMO-0004", "DEMO-0005"];
 const EXPECTED_SEED_REG_IDS = ["DEMO-REG-A", "DEMO-REG-A2", "DEMO-REG-B", "DEMO-REG-C", "DEMO-REG-D", "DEMO-REG-E"];
 
 // ───────────────────────────────────────────────

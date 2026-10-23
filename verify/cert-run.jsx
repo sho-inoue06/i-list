@@ -604,9 +604,13 @@ const SCENARIOS = [
         "DEMO-0002": { "DEMO-REG-A": "DEMO*A00/00*02", "DEMO-REG-D": "DEMO*D00/00*02" },
         "DEMO-0003": { "DEMO-REG-A": "DEMO*A00/00*03", "DEMO-REG-A2": "DEMO*A02/00*01", "DEMO-REG-B": "DEMO*B00/00*02", "DEMO-REG-D": "DEMO*D00/00*03" },
         "DEMO-0004": { "DEMO-REG-A": "DEMO*A00/00*04", "DEMO-REG-A2": "DEMO*A02/00*02", "DEMO-REG-D": "DEMO*D00/00*04" },
+        "DEMO-0005": { "DEMO-REG-A": "DEMO*A00/00*05", "DEMO-REG-B": "DEMO*B00/00*03", "DEMO-REG-C": "DEMO*C00/00*01", "DEMO-REG-D": "DEMO*D00/00*05" },
       };
-      const seedOld = viewOf(SEED, legacyEvalCellWith, legacySeedCert);
-      const seedNew = viewOf(SEED, evalCellWith, SEED.cert);
+      // F-25でSEEDにLO空のラン（r9）が入った。旧い入口はF-24（LO空＝判定不能）より前の写しなので、
+      // LOのあるランだけで突き合わせる（比べたいのは番号の持ち方の違いで、F-24の判定ではない）。
+      const seedLo = { ...SEED, runs: SEED.runs.filter((r) => r.lo !== "") };
+      const seedOld = viewOf(seedLo, legacyEvalCellWith, legacySeedCert);
+      const seedNew = viewOf(seedLo, evalCellWith, SEED.cert);
       asserts.check("SEED：旧い入口と新しい入口で見え方が同じ", JSON.stringify(seedNew) === JSON.stringify(seedOld), true);
       asserts.check("SEED：漏れ件数・危険ラン数（参考）", [seedNew.leaks.length, seedNew.risk.length], [seedOld.leaks.length, seedOld.risk.length]);
       // 疑似乱数のダミー300組
