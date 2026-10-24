@@ -49,16 +49,21 @@ export const TEXT = {
     生産中:   "生産中",
     "drop済み": "drop済み",
   },
-  // 危険な型式ランの一覧（F-10）。**危険かどうかの条件・しきい値はここに置かない**
+  // 危険な型式ランの一覧（F-10・F-26）。**危険かどうかの条件・しきい値はここに置かない**
   // （並べる条件は decideCell の出力だけで決まる。ここは「その結果をどう呼ぶか」だけ）。
   risk: {
     見出し:   "危険な型式ラン",
     件数:     (runs, cells) => `${runs} ラン・${cells} 件`,
     該当なし:  "危険な型式ランはありません。",
-    内訳:     (bad, warn) => `不適合 ${bad} 件・予告 ${warn} 件`,
+    // 3区分の呼び名（F-26）。kind（不適合／期限前／予告）ごとに1つ。
+    区分: { 不適合: "期限超過", 期限前: "期限前・未取得", 予告: "黄色予告" },
+    内訳:     (bad, due, warn) => `期限超過 ${bad} 件・期限前 ${due} 件・予告 ${warn} 件`,
     // 日数の主語は状態ごとに変える（A3）。「規制日まで何日超過」のような混ざった言い方はしない。
     超過日数:  (n) => `期限を過ぎて ${n} 日`,
+    期限前日数: (n) => `期限まで ${n} 日`,
     予告日数:  (n, afterDrop) => `継続車規制日まで ${n} 日（dropの ${afterDrop} 日後）`,
+    // F-26 A3。決定表の車両申請が「発生する（計画済み）」のセル（○あり）に付ける印。
+    計画済み:  "計画済み",
     日数不明:  "日数不明（日付が読めません）",
     // A9の印。判定は変えず、印を付けるだけ。
     同一性未確認: "同一性 未確認",
@@ -218,29 +223,32 @@ export const pruneCertByReg = (cert, rid) => {
 //
 // ■ 業務状態 → セルの対応表（A1）。**偶然そうなっているデータにしない。**
 //   verify/seed-demo.html がこの表そのものを突き合わせ、崩れても増えてもFAILする（A8）。
-//   1 現在法規不適合   … r6×REG-C（生産中・実績なし・期限を190日超過）＝F-10に「不適合」で出る
-//   2 黄色予告         … r6×REG-E（dropの15日後に継続車規制）＝F-10に「予告」で出る
+//   1 現在法規不適合   … r6×REG-C（生産中・実績なし・期限を190日超過）＝危険一覧に「期限超過」で出る
+//   2 黄色予告         … r6×REG-E（dropの15日後に継続車規制）＝危険一覧に「黄色予告」で出る
 //   3 法規適合必要     … r7×REG-C・r7×REG-E ほか（要だが期限がまだ先＝橙「要対応」）
-//                        ＝現行F-10の定義どおり一覧には出さない
+//                        ＝危険一覧に「期限前・未取得」で出る（F-26。開発中のランも含む）
 //   4 過去に法規不適合 … r3×REG-B（規制日のあともドロップまで実績なしで生産していた。前例も比較元も無い）
-//                        ＝マトリクスには灰色で残るが、一覧には出さない
+//                        ＝マトリクスには灰色で残るが、drop済みなので一覧には出さない（F-26 A1）
 //   5 実績あり         … DEMO-0001×REG-A が r1(000A)・r2(000B)・r4(000C) の3プロジェクトで緑（A5）ほか
 //   6 否（通常）       … r1×REG-B など
 //   単体版（F-23の前例あり）では、さらに次が出る：
 //   7 引き継ぎ確認中   … r5×REG-B（比較元r4が同じ法規行に番号を持つ＝認可番号待ち。F-23 A2・A7）ほか
-//   8 判定不能         … r9 の全法規（LOが空）
-//   9 drop未定         … r10 の全法規（dropが空。F-24）
+//                        ＝実績ありとして決定表へ渡るので一覧には出ない（F-26 B1）
+//   8 判定不能         … r9 の全法規（LOが空）＝一覧には出ない
+//   9 drop未定         … r10 の全法規（dropが空。F-24）＝要のセルは「期限前・未取得」で出る。黄色予告には出ない
 //   10 取得予定あり    … r7×REG-E（実績なし・予定あり＝車両申請「発生する（計画済み）」）
+//                        ＝「期限前・未取得」に「計画済み」の印つきで出る（F-26 A3）
 //   判定関数が返す状態が初期データに1件以上あることは verify/seed-demo.html の F-25 が確かめる。
 //
-// ■ 危険一覧（F-10）に出るのは **r6 だけ** にしてある（A2）。
-//   F-10の黄色予告は「dropの30日以内に継続車規制日が来る」セルにも出る仕様なので、
+// ■ 危険一覧（F-10・F-26）の3区分。期限超過と黄色予告は **r6 だけ** にしてある（F-25 A2）。
+//   黄色予告は「dropの30日以内に継続車規制日が来る」セルに出る仕様なので、
 //   ドロップ直後に規制日が来るデータなら一覧に並ぶ。
 //   それ自体は仕様どおりだが、**開発中の現物確認では主役（生産中の赤と予告）がぼやける**ため、
 //   r6 以外のランのドロップは、どの法規の継続車規制日からも30日窓の外に置いてある。
-//   判定式・抽出条件は変えていない（A6）。変えたのはSEEDの日付関係だけである。
 //   ＝ いま30日窓に入りうる継続車規制日は REG-A2(+200)・REG-C(+5)・REG-E(+165) の3つで、
 //      drop が窓に入るランは r6（drop +150 と REG-E の +165）だけになる（r8 の drop +120 は REG-E まで45日）。
+//   期限前・未取得は「要・実績なし・未超過」の全セルなので、開発中・生産中の多くのランに出る（F-26）。
+//   drop済みのラン（r1〜r3）はどの区分にも出ない（F-26 A1）。
 //
 // ■ 認証実績は 型式ラン × 法規行 で持つ（F-22）。ダミーでは、同じ型式の全ランに同じ番号を入れてある
 //   （F-22より前の「型式 × 法規で1つ」と同じ見え方。DEMO-0001×REG-A が3プロジェクトとも緑になる＝A5）。
@@ -1305,7 +1313,7 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
         (!!sameRec && (sameRec.needsRecheck || sameRec.value !== "未確認")));
       // 根拠（F-12）：継続車日を借りているセルだけ。判定・色・期日・要再確認には一切関与しない。
       const basis = basisCtx ? basisCtx.of(run, reg) : null;
-      // 危険（F-10）：決定表の出力の2つだけを読む。危険でないセルは null。
+      // 危険（F-10・F-26）：決定表の出力だけで3区分のどれかに入れる。どれにも入らないセルは null。
       const risk = riskOfCell(decision, today);
       const entry = { run, reg, auto, decision, notice, dec, compliance, base, sameRec, sameness, showSame, basis, risk };
       m.set(reg, entry);
@@ -1337,44 +1345,52 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
 }
 
 // ───────────────────────────────────────────────
-// 危険な型式ランの一覧（F-10）
+// 危険な型式ランの一覧（F-10・F-26）
 //
-// ここは **判定をしない**。decideCell の出力のうち次の2つが「はい」のセルだけを危険とし（A1）、
+// ここは **判定をしない**。decideCell の出力だけを読んでセルを3区分のどれかに入れ、
 // 画面に出す日数を数えるだけである。要否・期限・生産フェーズ・実績の有無をここで見直さない。
 //
-//   現在法規不適合 = はい … 要かつ実績なしかつ超過かつ生産中
-//   黄色予告       = はい … 否かつ実績なしかつ 0 < 継続車規制日 − drop ≤ 30 かつ 継続車規制日 > 今日
+//   共通ゲート（F-26 A1）… 生産フェーズ = drop済み のセルは、どの区分にも入れない（マトリクスには残る）
+//   期限超過（kind 不適合）… 現在法規不適合 = はい（要かつ実績なしかつ超過かつ生産中）
+//   期限前・未取得（kind 期限前）… 法規適合必要 = はい（要かつ実績なしかつ未超過）。開発中のランも入る。
+//                       ○ありの「計画済み」の印は、画面が決定表の車両申請を直接読んで付ける
+//                       （ここに持たせない＝○の付け外しで一覧の行の中身が変わらない。B2）
+//   黄色予告（kind 予告）… 黄色予告 = はい（否かつ実績なしかつ 0 < 継続車規制日 − drop ≤ 30 かつ 継続車規制日 > 今日）
 //
-// 出さないものと理由（2026-09-23の決定。別のゲートを足さない）：
-//   ・法規適合必要（超過前）… これから対応する正常な状態で、件数が多すぎて検出の意味がなくなる
-//   ・過去に法規不適合（drop済み）… いま手を打てない。状態自体はマトリクスに残る
-// この2条件から自動的に導かれること：
-//   ・開発中（今日 < LO）のランは構造上いちども超過にならない（期限 = max(規制日, LO)・F-19 C6）ので、
-//     現在法規不適合では出ない。黄色予告では出うる。
-//   ・drop済みのランの「要」のセルは 過去に法規不適合 になるので出ない。
-//     ただし **ドロップが30日以内の過去で、継続車規制日がこれから来る**セルは黄色予告の条件を満たすので出る
-//     （ドロップが延びれば引っかかる、という予告そのもの）。F-10ページの導出はここまで書き分けていないが、
-//     A1は「決定表の出力が はい のセルだけ・別のゲートを足さない」なので、そのまま出している。
+// 3つの出力は決定表の中で排他（要／否、超過／未超過で分かれる）なので、1セルは高々1区分に入る。
+// 決定表の出力から自動的に導かれること（一覧側にゲートを足していない）：
+//   ・実績あり（認可番号待ち＝前例ありで「実績あり」として渡るセルを含む）はどの区分にも入らない（B1）
+//   ・○の付け外しは車両申請の値を変えるだけで、上の3出力を変えない＝行・件数は変わらない（B2）
+//   ・判定不能（LO未入力）はどの出力も「いいえ」なので入らない
+//   ・drop未定（drop＝∞）には30日窓が無いので、黄色予告には入らない（要のセルは超過／期限前に入る）
 //   ・同一性切れは実効の適用区分を経て要否に反映済みなので、独立の条件にしない。
 //
 // ■ 日数（A3）。主語を状態ごとに変える（「規制日まで何日超過」のような混ざった言い方をしない）。
-//   現在法規不適合 … 期限を過ぎて n 日（n = 今日 − 期限日。期限日 = max(規制日, LO)。当日は0）
+//   期限超過       … 期限を過ぎて n 日（n = 今日 − 期限日。期限日 = max(規制日, LO)。当日は0）
+//   期限前・未取得 … 期限まで n 日（n = 期限日 − 今日。未超過なので 1 以上）
 //   黄色予告       … 継続車規制日まで n 日（n = 継続車規制日 − 今日）。dropの何日後かは決定表の窓の値
 //
 // ■ 並べ替えに使う「切迫度」（urgency）は、上の日数を1本の数直線へ載せ直したもの。
 //   超過は負、これからは正。小さいほど切迫している。**新しい判定ではなく日数の言い換え**である。
 //   期限日・継続車規制日が読めないときは null（＝最後に並べる。日数も出さない）。
 // ───────────────────────────────────────────────
-export const RISK_KINDS = ["不適合", "予告"];
+export const RISK_KINDS = ["不適合", "期限前", "予告"];
 
 export function riskOfCell(decision, today = TODAY) {
+  // 共通ゲート（F-26 A1）：drop済みのランはどの区分にも出さない。
+  if (!decision || decision.生産フェーズ === "drop済み") return null;
   const t = dateDayNumber(today);
-  if (decision?.現在法規不適合) {
+  if (decision.現在法規不適合) {
     const d = dateDayNumber(decision.期限日);
     const days = d === null || t === null ? null : t - d;     // 期限を過ぎて n 日（当日＝0）
     return { kind: "不適合", days, afterDrop: null, urgency: days === null ? null : -days };
   }
-  const y = decision?.黄色予告;
+  if (decision.法規適合必要) {
+    const d = dateDayNumber(decision.期限日);
+    const days = d === null || t === null ? null : d - t;     // 期限まで n 日
+    return { kind: "期限前", days, afterDrop: null, urgency: days };
+  }
+  const y = decision.黄色予告;
   if (y) {
     const k = dateDayNumber(y.keiDate);
     const days = k === null || t === null ? null : k - t;     // 継続車規制日まで n 日
@@ -1384,9 +1400,9 @@ export function riskOfCell(decision, today = TODAY) {
 }
 
 // 切迫している順（A3）。小さい＝切迫。日数が読めない行は最後。
-// 同点のときは不適合を先にする（数の上では超過が必ず 0 以下・予告が 1 以上なので
-// 実際には日数が読めない行どうしでしか起きないが、規則として明示しておく）。
-const RISK_RANK = { 不適合: 0, 予告: 1, drop未入力: 2 };
+// 同点のときは不適合を先にする（数の上では超過が必ず 0 以下・期限前と予告が 1 以上なので
+// 実際には日数が読めない行どうしか、期限前と予告の間でしか起きないが、規則として明示しておく）。
+const RISK_RANK = { 不適合: 0, 期限前: 1, 予告: 2, drop未入力: 3 };
 const cmpUrgency = (a, b) => {
   if (a.urgency === null && b.urgency === null) return RISK_RANK[a.kind] - RISK_RANK[b.kind];
   if (a.urgency === null) return 1;
@@ -1429,12 +1445,13 @@ export function riskRunRows(model, { runs = null } = {}) {
   for (const [run, cells] of byRun) {
     cells.sort((a, b) => cmpUrgency(a.risk, b.risk));
     const bad = cells.filter((m) => m.risk.kind === "不適合").length;
+    const due = cells.filter((m) => m.risk.kind === "期限前").length;
     const alert = model.alertOf?.(run) || null;
     // 最も切迫した法規行（並べ替え済みなので先頭）。危険な法規が無いラン（異常だけ）は null。
     const head = cells.length > 0 ? cells[0].risk : { kind: alert, urgency: null };
     rows.push({
       run, phase: model.phaseOf(run), cells,
-      bad, warn: cells.length - bad,
+      bad, due, warn: cells.length - bad - due,
       kind: head.kind, urgency: head.urgency, top: cells.length > 0 ? head : null,
       alert,
       // A9：同一性が未確認（比較元があるのに未回答）のセルを含むか。印だけで、並べる条件には効かない。
@@ -2327,20 +2344,49 @@ function ColumnFilterBar({ projectOptions, typeOptions, selProjects, setSelProje
 // 日数（A3）。主語は状態ごとに変える。読めない日付は日数を出さず、そう書く。
 function RiskDays({ risk, bold = true }) {
   if (risk.days === null) return <span style={{ color:MUTE }}>{TEXT.risk.日数不明}</span>;
-  return risk.kind === "不適合"
-    ? <span style={{ color:RED, fontWeight: bold ? 800 : 600 }}>{TEXT.risk.超過日数(risk.days)}</span>
-    : <span style={{ color:AMBER, fontWeight: bold ? 800 : 600 }}>{TEXT.risk.予告日数(risk.days, risk.afterDrop)}</span>;
+  const fontWeight = bold ? 800 : 600;
+  if (risk.kind === "不適合") return <span style={{ color:RED, fontWeight }}>{TEXT.risk.超過日数(risk.days)}</span>;
+  if (risk.kind === "期限前") return <span style={{ color:ORANGE, fontWeight }}>{TEXT.risk.期限前日数(risk.days)}</span>;
+  return <span style={{ color:AMBER, fontWeight }}>{TEXT.risk.予告日数(risk.days, risk.afterDrop)}</span>;
+}
+
+// 区分（F-26）。法規行の先頭に1語だけ出す。色は日数と同じ系統（赤＝超過・橙＝期限前・黄＝予告）。
+const RISK_COLOR = { 不適合: RED, 期限前: ORANGE, 予告: AMBER };
+function RiskKind({ kind }) {
+  const c = RISK_COLOR[kind] || MUTE;
+  return (
+    <span style={{ display:"inline-block", fontSize:9, fontWeight:700, padding:"0 5px", borderRadius:3,
+      border:`1px solid ${c}`, color:c, background:`${c}14`, lineHeight:1.7, marginRight:5 }}>
+      {TEXT.risk.区分[kind]}
+    </span>
+  );
+}
+
+// ○あり（車両申請＝発生する（計画済み））の印（F-26 A3）。一覧に出す・出さないには効かない。
+function PlannedMark() {
+  return (
+    <span title="取得予定（○）が付いています。車両申請は「発生する（計画済み）」です。"
+      style={{ display:"inline-block", fontSize:9, fontWeight:700, padding:"0 5px", borderRadius:999,
+        border:`1px solid ${GREEN}`, color:GREEN, background:`${GREEN}12`, lineHeight:1.7, marginLeft:5 }}>
+      {TEXT.risk.計画済み}
+    </span>
+  );
 }
 
 // 状態。帳票のセルと同じ状態名を出す（A7：マトリクスの状態と一覧の状態が一致する）。
-//   不適合の行 … F-14の4状態（人が対象外と判断していればその表示になる。判断は一覧に出すか否かには効かない）
-//   予告の行   … 帳票セルと同じ「否・要再確認」
+//   不適合・期限前の行 … F-14の4状態（人が対象外と判断していればその表示になる。判断は一覧に出すか否かには効かない）
+//   予告の行           … 帳票セルと同じ「否・要再確認」
 function RiskState({ m }) {
   if (m.risk.kind === "予告")
-    return <span style={{ fontSize:11, fontWeight:700, color:AMBER }}>{TEXT.cell.否要再確認}</span>;
-  return m.compliance
+    return <><RiskKind kind="予告" /><span style={{ fontSize:11, fontWeight:700, color:AMBER }}>{TEXT.cell.否要再確認}</span></>;
+  if (m.risk.kind === "期限前")
+    return <><RiskKind kind="期限前" />{m.compliance
+      ? <ComplianceLabel s={m.compliance} fontSize={11} />
+      : <span style={{ fontSize:11, fontWeight:700, color:ORANGE }}>{TEXT.risk.区分.期限前}</span>}
+      {m.decision.車両申請 === "発生する（計画済み）" && <PlannedMark />}</>;
+  return <><RiskKind kind="不適合" />{m.compliance
     ? <ComplianceLabel s={m.compliance} fontSize={11} />
-    : <span style={{ fontSize:11, fontWeight:800, color:RED }}>{TEXT.compliance.法規不適合()}</span>;
+    : <span style={{ fontSize:11, fontWeight:800, color:RED }}>{TEXT.compliance.法規不適合()}</span>}</>;
 }
 
 // A9の印。同一性が未確認（比較元があるのに未回答）のセルに付ける。
@@ -2406,7 +2452,7 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
           {!hasRisk ? (
             /* 件数の欄がすでに「該当なし」と言っているので、ここでは繰り返さず説明だけを残す */
             <p style={{ color:MUTE, fontSize:11, margin:"6px 0" }}>
-              表示中の型式ランには、下の2条件に当たるセルがありません。
+              表示中の型式ランには、下の3区分に当たるセルがありません。
             </p>
           ) : (
           <>
@@ -2442,7 +2488,7 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
                         </button>
                         {r.alert && <DropMissingMark />}
                         {r.top && <>
-                          <span style={{ marginLeft:10, fontSize:10.5, color:"#aab8c6" }}>{TEXT.risk.内訳(r.bad, r.warn)}</span>
+                          <span style={{ marginLeft:10, fontSize:10.5, color:"#aab8c6" }}>{TEXT.risk.内訳(r.bad, r.due, r.warn)}</span>
                           <span style={{ marginLeft:10, fontSize:10.5 }}><RiskDays risk={r.top} /></span></>}
                         {r.unconfirmed && <SamenessUnknownMark title={MARK_TITLE} />}
                       </td>
@@ -2478,14 +2524,15 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
               「要対応」は辞書が日付つきの文言しか持たない（TEXT.compliance.要対応期日／要対応LO）ので、
               その族の呼び名としてかぎ括弧で書いている。 */}
           <div style={{ marginTop:8, fontSize:10, color:MUTE, lineHeight:1.7 }}>
-            並ぶのは <b style={{ color:RED }}>{TEXT.compliance.法規不適合()}（いま生産中・期限を過ぎている・実績なし）</b> と
-            <b style={{ color:AMBER }}>{TEXT.cell.否要再確認}（ドロップ後30日以内にこれから継続規制が来る）</b> の
-            2つだけです。<b>これから対応する「要対応」の分と、{TEXT.compliance.過去不適合()}は出しません</b>
-            （前者は件数が多すぎて検出の意味がなくなり、後者はいま手を打てないため）。
-            まだラインオフしていないランは期限がLOになるため、{TEXT.compliance.法規不適合()}では出ません。
-            ドロップ済みのランでも、<b>ドロップ直後にこれから継続規制が来る</b>場合は予告として出ます（ドロップが延びれば引っかかるため）。
-            dropが空のランは<b>生産が続く前提（drop＝∞）</b>で同じ2条件に通し、出た行に
-            <span style={{ display:"inline-flex", verticalAlign:"middle" }}><DropUndecidedMark /></span> を付けます。
+            並ぶのは次の3区分です。
+            <b style={{ color:RED }}>{TEXT.risk.区分.不適合}</b>（{TEXT.compliance.法規不適合()}：いま生産中・期限を過ぎている・実績なし）、
+            <b style={{ color:ORANGE }}>{TEXT.risk.区分.期限前}</b>（「要対応」：要・実績なし・期限はまだ先。まだラインオフしていないランも入ります）、
+            <b style={{ color:AMBER }}>{TEXT.risk.区分.予告}</b>（{TEXT.cell.否要再確認}：ドロップ後30日以内にこれから継続規制が来る）。
+            取得予定（○）が付いているセルは期限前・未取得のまま
+            <span style={{ display:"inline-flex", verticalAlign:"middle" }}><PlannedMark /></span> を付けます（○の有無で行・件数は変わりません）。
+            <b>実績あり（認可番号待ちを含む）のセルと、ドロップ済みのランは出しません</b>（ドロップ済みのランの状態は、{TEXT.compliance.過去不適合()}を含めてマトリクスに残ります）。
+            dropが空のランは<b>生産が続く前提（drop＝∞）</b>で判定し、出た行に
+            <span style={{ display:"inline-flex", verticalAlign:"middle" }}><DropUndecidedMark /></span> を付けます（dropが無いので黄色予告には入りません）。
             <b>LOを迎えたのにdropが空</b>のランは入力漏れとして、法規に関係なくラン単位で
             <b style={{ color:RED }}>{TEXT.risk.drop未入力}</b> を出します（法規の件数には数えません）。
             LOが空のランは判定不能なので出しません（帳票のセルに出ます）。

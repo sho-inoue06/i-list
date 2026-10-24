@@ -9,6 +9,8 @@
 //   → http://127.0.0.1:5173/verify/risk.html
 //
 // 完成条件 A1〜A10（Notion「Iリスト｜バックログ」F-10）を、ケースIDの先頭で対応づける。
+// F-26 で一覧の区分が「期限超過／期限前・未取得／黄色予告」の3区分＋drop済み除外に変わったため、
+// 「2条件だけ」を前提にしていた期待値を F-26 の定義に合わせて書き直してある（F-26の境界は verify/categories.html）。
 // A8 の「両build成功」はこのページの対象外（build コマンドで確認する）。
 //
 // 期待値に固定日付を書かない。F-13と同じく、実行時の端末ローカル日付から相対日付を作る。
@@ -60,20 +62,23 @@ const L_YELLOW = "否・要再確認";
 const L_NONE = "危険な型式ランはありません。";
 const L_MARK = "同一性 未確認";
 const L_COUNT = (runs, cells) => `${runs} ラン・${cells} 件`;
-const L_BREAK = (bad, warn) => `不適合 ${bad} 件・予告 ${warn} 件`;
+const L_BREAK = (bad, due, warn) => `期限超過 ${bad} 件・期限前 ${due} 件・予告 ${warn} 件`;
+const L_DUE = (n) => `期限まで ${n} 日`;
+// F-26：法規行の状態欄は先頭に区分名が付く
+const K_OVER = "期限超過", K_DUE = "期限前・未取得", K_YELLOW = "黄色予告";
 const L_OVER = (n) => `期限を過ぎて ${n} 日`;
 const L_LEFT = (n, afterDrop) => `継続車規制日まで ${n} 日（dropの ${afterDrop} 日後）`;
 
 // ── ダミーデータ（架空。実車・実法規・実認可番号とは無関係） ──
 // すべて継続ランにして、要否は「継続車規制日 ≤ drop」だけで決まるようにする。
 //
-//   r501 TYPE-1 / PJ-A / 生産中     … REG-OVERDUE で法規不適合（期限＝規制日・100日超過）
-//   r502 TYPE-2 / PJ-A / 開発中     … 期限がLOになるので超過しない＝法規適合必要（一覧に出ない）
-//   r503 TYPE-3 / PJ-B / drop済み   … 過去に法規不適合（一覧に出ない）
-//   r504 TYPE-4 / PJ-B / 生産中     … REG-OVERDUE に実績あり（一覧に出ない）
+//   r501 TYPE-1 / PJ-A / 生産中     … REG-OVERDUE で法規不適合（期限＝規制日・100日超過）＋ 残り3法規は期限前
+//   r502 TYPE-2 / PJ-A / 開発中     … 期限がLOになるので超過しない＝法規適合必要（F-26から期限前・未取得で出る）
+//   r503 TYPE-3 / PJ-B / drop済み   … 過去に法規不適合（drop済みなので出ない）
+//   r504 TYPE-4 / PJ-B / 生産中     … REG-OVERDUE に実績あり（そのセルは出ない）。他の3法規は期限前で出る
 //   r505 TYPE-5 / PJ-C / 生産中     … 法規不適合（期限＝LO・50日超過）＋ 黄色予告（15日後）
-//   r506 TYPE-6 / PJ-C / 開発中     … 開発中でも黄色予告では出る（80日後）
-//   r508 TYPE-8 / PJ-C / 生産中     … 要・否の両方に実績あり（どちらの条件でも出ない）
+//   r506 TYPE-6 / PJ-C / 開発中     … 開発中でも黄色予告では出る（80日後）＋ 期限前2件（期限＝LO・60日後）
+//   r508 TYPE-8 / PJ-C / 生産中     … 要・否の両方に実績あり（どの区分にも出ない）
 const D = {
   LONG_AGO: shift(-3650), FAR: shift(3650),
   OVER: shift(-100), LO_MID: shift(-50), DROP_SOON: shift(5),
@@ -106,23 +111,25 @@ const MAIN = {
 
 // 同一性（A9）用。比較元を選んでいるのに未回答のセルを作る。
 //   r522 × g521 … 新型車日(150日前) ≤ LO(100日前) なので新型車側で判定＝法規不適合（100日超過）＋根拠未確認
-//   r522 × g522 … 根拠未確認だが法規適合必要。**印があっても一覧には出さない**ことの対照
+//   r522 × g522 … 根拠未確認だが実績あり。**印があっても一覧には出さない**ことの対照
+//                 （F-26 から法規適合必要は期限前・未取得で出るので、対照は実績ありのセルにした）
+//   r521        … 比較元。F-26 では drop済みにして一覧から外す（比較元の条件に drop は関わらない）
 const S = { BASE_LO: shift(-200), SUB_LO: shift(-100), SHIN: shift(-150), FAR: shift(3650), LATER: shift(500), LATER2: shift(600) };
 const SAME_DUMMY = {
   runs: [
-    { key: "r521", typeId: "TYPE-BASE", gen: "PJ-S", sk: "新", lo: S.BASE_LO, drop: S.FAR },
+    { key: "r521", typeId: "TYPE-BASE", gen: "PJ-S", sk: "新", lo: S.BASE_LO, drop: shift(-1) },
     { key: "r522", typeId: "TYPE-SUB",  gen: "PJ-S", sk: "新", lo: S.SUB_LO,  drop: S.FAR },
   ],
   regs: [
     { rid: "g521", id: "REG-S1", label: "ダミー法規（新型車日は150日前）", shin: S.SHIN,  kei: shift(3000), parent: "" },
     { rid: "g522", id: "REG-S2", label: "ダミー法規（新型車日は500日後）", shin: S.LATER, kei: S.LATER2,   parent: "" },
   ],
-  cert: {},
+  cert: { "TYPE-SUB": { "REG-S2": "CK-SUB-S2" } },
   bases: [{ runKey: "r522", baseRunKey: "r521", decidedAt: `${LOCAL_TODAY} 10:00` }],
   sameness: [],   // 回答なし＝未確認（比較元はあるので decideCell の 根拠未確認 が はい になる）
 };
 
-// A1の2条件をそのまま読んだ結果、drop直後のランが黄色予告で出る場合の確認用。
+// drop直後のランの確認用。決定表の黄色予告は はい だが、F-26 A1 の共通ゲート（drop済み除外）で一覧には出ない。
 //   r531 … 昨日ドロップ／継続車規制日は15日後（窓16日・これから来る）＝黄色予告＝はい
 const EDGE_DUMMY = {
   runs: [{ key: "r531", typeId: "TYPE-E", gen: "PJ-E", sk: "継", lo: D.LONG_AGO, drop: shift(-1) }],
@@ -253,15 +260,15 @@ const SCENARIOS = [
   },
   {
     id: "A1-two-conditions-only",
-    name: "危険は「現在法規不適合」と「黄色予告」の2つだけ",
-    expect: "riskOfCell が返すのはこの2条件のときだけ。法規適合必要・過去に法規不適合・実績あり・ただの否は null",
+    name: "危険は「現在法規不適合」「法規適合必要」「黄色予告」の3区分（F-26）",
+    expect: "riskOfCell が返すのはこの3出力のときだけ。過去に法規不適合・実績あり・ただの否は null",
     async run({ asserts }) {
-      asserts.check("危険の種別は2つ", RISK_KINDS, ["不適合", "予告"]);
+      asserts.check("危険の種別は3つ", RISK_KINDS, ["不適合", "期限前", "予告"]);
       const of = (o) => riskOfCell(decideCell({ side: "継", ...o }));
       // 現在法規不適合（要・実績なし・超過・生産中）
       asserts.check("現在法規不適合＝不適合", of({ lo: D.LONG_AGO, drop: D.FAR, kei: D.OVER })?.kind, "不適合");
-      // 法規適合必要（超過前）は出さない
-      asserts.check("法規適合必要は出さない", of({ lo: D.LONG_AGO, drop: D.FAR, kei: D.SOON }), null);
+      // 法規適合必要（超過前）は期限前・未取得（F-26 A3）
+      asserts.check("法規適合必要＝期限前", of({ lo: D.LONG_AGO, drop: D.FAR, kei: D.SOON }), { kind: "期限前", days: 200, afterDrop: null, urgency: 200 });
       // 過去に法規不適合（drop済み）は出さない
       asserts.check("過去に法規不適合は出さない", of({ lo: D.LONG_AGO, drop: D.OVER, kei: shift(-200) }), null);
       // 実績ありは出さない（要側・否側の両方）
@@ -278,24 +285,27 @@ const SCENARIOS = [
   },
   {
     id: "A1-dev-run",
-    name: "開発中のランは不適合で出ない（黄色予告では出うる）",
-    expect: "今日<LO のランは期限がLOになり超過しないので不適合に入らない。黄色予告の条件は満たしうる",
+    name: "開発中のランは不適合で出ない（期限前・黄色予告では出る）",
+    expect: "今日<LO のランは期限がLOになり超過しないので不適合に入らない。期限前・未取得（F-26 A3）と黄色予告には入る",
     async run({ asserts }) {
       const { model, runs } = modelOf(MAIN);
       const rows = riskRunRows(model, { runs });
       const r502 = rows.find((r) => r.run.key === "r502");
-      asserts.check("開発中で規制日だけ過去のラン（TYPE-2）は一覧に出ない", r502, undefined);
+      asserts.check("開発中で規制日だけ過去のラン（TYPE-2）は期限前だけで出る",
+        [r502.phase, r502.bad, r502.due, r502.warn, r502.cells.map((m) => m.risk.kind)], ["開発中", 0, 4, 0, ["期限前", "期限前", "期限前", "期限前"]]);
+      asserts.check("期限はLO（60日後）", [r502.top.kind, r502.top.days], ["期限前", 60]);
       const r506 = rows.find((r) => r.run.key === "r506");
       asserts.checkTrue("開発中でも黄色予告のラン（TYPE-6）は出る", !!r506);
       asserts.check("TYPE-6の生産フェーズ", r506.phase, "開発中");
-      asserts.check("TYPE-6の内訳", [r506.bad, r506.warn], [0, 1]);
-      asserts.check("TYPE-6の日数", [r506.top.kind, r506.top.days, r506.top.afterDrop], ["予告", 80, 10]);
+      asserts.check("TYPE-6の内訳", [r506.bad, r506.due, r506.warn], [0, 2, 1]);
+      asserts.check("TYPE-6の予告の日数", r506.cells.filter((m) => m.risk.kind === "予告").map((m) => [m.risk.days, m.risk.afterDrop]), [[80, 10]]);
+      asserts.check("TYPE-6の最も切迫した行は期限前（LOまで60日）", [r506.top.kind, r506.top.days], ["期限前", 60]);
     },
   },
   {
     id: "A1-dropped-and-cert",
     name: "drop済み（過去に法規不適合）と実績ありは出ない",
-    expect: "TYPE-3（drop済み・過去に法規不適合）と TYPE-4・TYPE-8（実績あり）は一覧に出ない",
+    expect: "TYPE-3（drop済み）と TYPE-8（要・否とも実績あり）は一覧に出ない。TYPE-4 は実績ありの REG-OVERDUE だけが出ない（他の法規は期限前で出る）",
     async run({ asserts }) {
       const { model, runs, regs } = modelOf(MAIN);
       const cell = (rk, rid) => model.get(runs.find((r) => r.key === rk), regs.find((r) => r.rid === rid));
@@ -307,9 +317,10 @@ const SCENARIOS = [
       asserts.check("実績が無ければ同じ日程で黄色予告が出る（対照）",
         cell("r505", "g503").decision.黄色予告 !== null, true);
       const keys = riskRunRows(model, { runs }).map((r) => r.run.key);
-      asserts.check("一覧に出るラン", keys, ["r501", "r505", "r506"]);
+      asserts.check("一覧に出るラン", keys, ["r501", "r505", "r504", "r506", "r502"]);
       asserts.check("drop済みのTYPE-3は出ない", keys.includes("r503"), false);
-      asserts.check("実績ありのTYPE-4は出ない", keys.includes("r504"), false);
+      const r504 = riskRunRows(model, { runs }).find((r) => r.run.key === "r504");
+      asserts.check("TYPE-4は実績ありのREG-OVERDUEを出さない", r504.cells.map((m) => m.reg.id).includes("REG-OVERDUE"), false);
       asserts.check("要・否の両方に実績があるTYPE-8は出ない", keys.includes("r508"), false);
     },
   },
@@ -320,38 +331,38 @@ const SCENARIOS = [
     async run({ mount, asserts }) {
       const c = await mountWith(mount, MAIN);
       await openPanel(c);
-      asserts.check("ラン行は3本", groupTypeIds(c), ["TYPE-1", "TYPE-5", "TYPE-6"]);
-      asserts.check("既定では法規行は畳まれている", riskGroups(c).map((g) => g.regs.length), [0, 0, 0]);
+      asserts.check("ラン行は5本", groupTypeIds(c), ["TYPE-1", "TYPE-5", "TYPE-4", "TYPE-6", "TYPE-2"]);
+      asserts.check("既定では法規行は畳まれている", riskGroups(c).map((g) => g.regs.length), [0, 0, 0, 0, 0]);
       const head = riskGroups(c)[1].head.textContent;
       asserts.checkTrue("ラン行にプロジェクト", head.includes("PJ-C"));
       asserts.checkTrue("ラン行に型式ラン", head.includes("TYPE-5"));
       asserts.checkTrue("ラン行に生産フェーズ", head.includes("生産中"));
       asserts.checkTrue("ラン行にLO・drop", head.includes(`LO ${fmt(D.LO_MID)}`) && head.includes(`drop ${fmt(D.DROP_SOON)}`));
-      asserts.checkTrue("ラン行に危険件数の内訳", head.includes(L_BREAK(1, 1)));
+      asserts.checkTrue("ラン行に危険件数の内訳", head.includes(L_BREAK(1, 0, 1)));
       asserts.checkTrue("ラン行に最も切迫した日数", head.includes(L_OVER(50)));
       await toggleGroup(c, "TYPE-5");
       const regs = riskGroups(c).find((g) => g.head.textContent.includes("TYPE-5")).regs;
       asserts.check("展開でそのランの危険な法規が並ぶ", regs.length, 2);
       asserts.check("法規行の項目（法規/状態/適用した規制/規制日/期限/日数）", regCells(regs[0]),
-        ["REG-OVERDUEダミー法規（継続車日は100日前）", L_VIOLATION, "継続", fmt(D.OVER), `LO ${fmt(D.LO_MID)}`, L_OVER(50)]);
+        ["REG-OVERDUEダミー法規（継続車日は100日前）", K_OVER + L_VIOLATION, "継続", fmt(D.OVER), `LO ${fmt(D.LO_MID)}`, L_OVER(50)]);
       asserts.check("2本目は黄色予告の行", regCells(regs[1]),
-        ["REG-YELLOWダミー法規（継続車日は15日後）", L_YELLOW, "—", fmt(D.YELLOW), "—", L_LEFT(15, 10)]);
+        ["REG-YELLOWダミー法規（継続車日は15日後）", K_YELLOW + L_YELLOW, "—", fmt(D.YELLOW), "—", L_LEFT(15, 10)]);
       await toggleGroup(c, "TYPE-5");
       asserts.check("もう一度押すと畳む", riskGroups(c)[1].regs.length, 0);
       await clickInPanel(c, /すべて展開/);
-      asserts.check("すべて展開", riskGroups(c).map((g) => g.regs.length), [1, 2, 1]);
+      asserts.check("すべて展開", riskGroups(c).map((g) => g.regs.length), [4, 2, 3, 3, 4]);
     },
   },
   {
     id: "A3-days-and-order",
     name: "日数の主語を状態ごとに変え、最も切迫した日数の昇順に並べる",
-    expect: "不適合＝「期限を過ぎて n 日」／予告＝「継続車規制日まで n 日（dropの n 日後）」。超過が最上段",
+    expect: "不適合＝「期限を過ぎて n 日」／期限前＝「期限まで n 日」／予告＝「継続車規制日まで n 日（dropの n 日後）」。超過が最上段",
     async run({ mount, asserts }) {
       const { model, runs } = modelOf(MAIN);
       const rows = riskRunRows(model, { runs });
       asserts.check("元データの並びは切迫順ではない", MAIN.runs.map((r) => r.typeId).slice(0, 2), ["TYPE-6", "TYPE-2"]);
-      asserts.check("切迫度（超過は負・これからは正）", rows.map((r) => r.urgency), [-100, -50, 80]);
-      asserts.check("並び順は昇順（元の並びを切迫順へ並べ替える）", rows.map((r) => r.run.typeId), ["TYPE-1", "TYPE-5", "TYPE-6"]);
+      asserts.check("切迫度（超過は負・これからは正）", rows.map((r) => r.urgency), [-100, -50, 15, 60, 60]);
+      asserts.check("並び順は昇順（元の並びを切迫順へ並べ替える）", rows.map((r) => r.run.typeId), ["TYPE-1", "TYPE-5", "TYPE-4", "TYPE-6", "TYPE-2"]);
       asserts.check("元データの法規の並びも切迫順ではない", MAIN.regs.map((r) => r.id).slice(0, 3), ["REG-YELLOW", "REG-SOON", "REG-OVERDUE"]);
       asserts.check("ランの中も切迫順（不適合が先）",
         rows[1].cells.map((m) => [m.reg.id, m.risk.urgency]), [["REG-OVERDUE", -50], ["REG-YELLOW", 15]]);
@@ -364,8 +375,9 @@ const SCENARIOS = [
       const text = riskTable(c).textContent;
       asserts.checkTrue("不適合の主語", text.includes(L_OVER(100)) && text.includes(L_OVER(50)));
       asserts.checkTrue("予告の主語", text.includes(L_LEFT(15, 10)) && text.includes(L_LEFT(80, 10)));
+      asserts.checkTrue("期限前の主語", text.includes(L_DUE(15)) && text.includes(L_DUE(60)) && text.includes(L_DUE(200)));
       asserts.check("「規制日まで n 日超過」のような混ざった言い方をしない", /日超過/.test(text), false);
-      asserts.check("画面の並びも切迫順", groupTypeIds(c), ["TYPE-1", "TYPE-5", "TYPE-6"]);
+      asserts.check("画面の並びも切迫順", groupTypeIds(c), ["TYPE-1", "TYPE-5", "TYPE-4", "TYPE-6", "TYPE-2"]);
     },
   },
   {
@@ -375,22 +387,27 @@ const SCENARIOS = [
     async run({ mount, asserts }) {
       const c = await mountWith(mount, MAIN);
       await openPanel(c);
-      asserts.check("初期（絞り込みなし）", [groupTypeIds(c), riskCountText(c)], [["TYPE-1", "TYPE-5", "TYPE-6"], L_COUNT(3, 4)]);
+      const ALL5 = ["TYPE-1", "TYPE-5", "TYPE-4", "TYPE-6", "TYPE-2"];
+      asserts.check("初期（絞り込みなし）", [groupTypeIds(c), riskCountText(c)], [ALL5, L_COUNT(5, 16)]);
       await toggleChip(c, "PJ-C");
-      asserts.check("プロジェクトで絞る", [groupTypeIds(c), riskCountText(c)], [["TYPE-5", "TYPE-6"], L_COUNT(2, 3)]);
+      asserts.check("プロジェクトで絞る", [groupTypeIds(c), riskCountText(c)], [["TYPE-5", "TYPE-6"], L_COUNT(2, 5)]);
       await toggleChip(c, "TYPE-6");
-      asserts.check("プロジェクト×車両型式（AND）", [groupTypeIds(c), riskCountText(c)], [["TYPE-6"], L_COUNT(1, 1)]);
+      asserts.check("プロジェクト×車両型式（AND）", [groupTypeIds(c), riskCountText(c)], [["TYPE-6"], L_COUNT(1, 3)]);
       await toggleChip(c, "PJ-C");
-      asserts.check("車両型式だけ", [groupTypeIds(c), riskCountText(c)], [["TYPE-6"], L_COUNT(1, 1)]);
-      await toggleChip(c, "TYPE-4");
-      asserts.check("欄内は OR（危険が無い型式を足しても増えない）", [groupTypeIds(c), riskCountText(c)], [["TYPE-6"], L_COUNT(1, 1)]);
+      asserts.check("車両型式だけ", [groupTypeIds(c), riskCountText(c)], [["TYPE-6"], L_COUNT(1, 3)]);
+      // F-26 から TYPE-4 は期限前で出るので、危険が無い型式は TYPE-8（要・否とも実績あり）を使う
+      await toggleChip(c, "TYPE-8");
+      asserts.check("欄内は OR（危険が無い型式を足しても増えない）", [groupTypeIds(c), riskCountText(c)], [["TYPE-6"], L_COUNT(1, 3)]);
       await toggleChip(c, "TYPE-1");
       asserts.check("欄内は OR（危険がある型式を足すと増える）", groupTypeIds(c), ["TYPE-1", "TYPE-6"]);
+      // drop済みの TYPE-3 を足しても増えない（F-26 A1）。PJ-B と組み合わせると表示中は TYPE-3 だけになる
+      await toggleChip(c, "TYPE-3");
+      asserts.check("drop済みの型式を足しても増えない", groupTypeIds(c), ["TYPE-1", "TYPE-6"]);
       await toggleChip(c, "PJ-B");
       asserts.check("危険が1件も無い組み合わせ", [riskGroups(c).length, riskCountText(c)], [0, L_NONE]);
       asserts.checkTrue("該当なしの文言が出る", panelEl(c).textContent.includes(L_NONE));
       await clickByText(c, /すべて表示/);
-      asserts.check("解除で全体の見回しに戻る", [groupTypeIds(c), riskCountText(c)], [["TYPE-1", "TYPE-5", "TYPE-6"], L_COUNT(3, 4)]);
+      asserts.check("解除で全体の見回しに戻る", [groupTypeIds(c), riskCountText(c)], [ALL5, L_COUNT(5, 16)]);
     },
   },
   {
@@ -412,9 +429,12 @@ const SCENARIOS = [
         const tr = g.regs.find((x) => x.children[0].textContent.includes(regId));
         return regCells(tr)[1];
       };
-      asserts.check("一覧の状態も同じ（TYPE-1×REG-OVERDUE）", state("TYPE-1", "REG-OVERDUE"), L_VIOLATION);
-      asserts.check("一覧の状態も同じ（TYPE-5×REG-YELLOW）", state("TYPE-5", "REG-YELLOW"), L_YELLOW);
-      asserts.check("一覧の状態も同じ（TYPE-6×REG-YELLOW2）", state("TYPE-6", "REG-YELLOW2"), L_YELLOW);
+      // 状態欄は「区分名＋帳票セルと同じ状態名」（F-26）
+      asserts.check("一覧の状態も同じ（TYPE-1×REG-OVERDUE）", state("TYPE-1", "REG-OVERDUE"), K_OVER + L_VIOLATION);
+      asserts.check("一覧の状態も同じ（TYPE-5×REG-YELLOW）", state("TYPE-5", "REG-YELLOW"), K_YELLOW + L_YELLOW);
+      asserts.check("一覧の状態も同じ（TYPE-6×REG-YELLOW2）", state("TYPE-6", "REG-YELLOW2"), K_YELLOW + L_YELLOW);
+      asserts.checkTrue("帳票 TYPE-1×REG-SOON は要対応", matrixCell(c, 1, COL.r501).includes(`要対応｜${fmt(D.SOON)}まで`));
+      asserts.check("一覧の状態も同じ（TYPE-1×REG-SOON）", state("TYPE-1", "REG-SOON"), K_DUE + `要対応｜${fmt(D.SOON)}まで`);
       // 危険でないセルは帳票に残り、一覧には出ない
       asserts.checkTrue("帳票 TYPE-3×REG-OVERDUE は過去に法規不適合のまま残る", matrixCell(c, ROW.g501, COL.r503).includes(L_PAST));
       asserts.check("一覧には TYPE-3 が無い", groupTypeIds(c).includes("TYPE-3"), false);
@@ -434,7 +454,7 @@ const SCENARIOS = [
     async run({ mount, asserts }) {
       const c = await mountWith(mount, MAIN);
       asserts.check("既定は閉じている（表が無い）", riskTable(c), null);
-      asserts.check("件数だけ見える", riskCountText(c), L_COUNT(3, 4));
+      asserts.check("件数だけ見える", riskCountText(c), L_COUNT(5, 16));
       // 帳票（マトリクス）より上にある
       const p = panelEl(c), m = matrixTable(c);
       asserts.check("パネルは帳票より前にある",
@@ -448,12 +468,12 @@ const SCENARIOS = [
   {
     id: "A9-sameness-mark",
     name: "同一性が未確認のセルに印を付ける（印だけを理由に一覧へ出さない）",
-    expect: "一覧に出たラン行・法規行に「同一性 未確認」の印が付く。印があっても法規適合必要のセルは出ない",
+    expect: "一覧に出たラン行・法規行に「同一性 未確認」の印が付く。印があっても実績ありのセルは出ない",
     async run({ mount, asserts }) {
       const { model, runs } = modelOf(SAME_DUMMY, true);
       const rows = riskRunRows(model, { runs });
       asserts.check("一覧に出るのは法規不適合のランだけ", rows.map((r) => r.run.key), ["r522"]);
-      asserts.check("そのランの危険な法規は1本だけ（REG-S2は法規適合必要）", rows[0].cells.map((m) => m.reg.id), ["REG-S1"]);
+      asserts.check("そのランの危険な法規は1本だけ（REG-S2は実績あり）", rows[0].cells.map((m) => m.reg.id), ["REG-S1"]);
       asserts.check("ラン行に印が立つ", rows[0].unconfirmed, true);
       const c = await mountWith(mount, SAME_DUMMY);
       await openPanel(c);
@@ -473,15 +493,16 @@ const SCENARIOS = [
   },
   {
     id: "A1-edge-dropped-yellow",
-    name: "A1の2条件をそのまま読む：昨日ドロップしたランでも、これから来る継続車規制日が窓内なら予告で出る",
-    expect: "drop < 今日 でも「否・実績なし・0<継続車日−drop≤30・継続車日>今日」を満たすので黄色予告として出る（別ゲートを足さない）",
+    name: "F-26 A1：昨日ドロップしたランは、決定表の黄色予告が はい でも一覧に出ない（共通ゲート）",
+    expect: "drop < 今日 のランは drop済み。帳票セルは否・予告のまま残り、一覧には出ない",
     async run({ asserts }) {
       const { model, runs, regs } = modelOf(EDGE_DUMMY);
       const m = model.get(runs[0], regs[0]);
       asserts.check("生産フェーズはdrop済み", m.decision.生産フェーズ, "drop済み");
       asserts.check("帳票セルも黄色予告", m.decision.表示, "否・予告");
       const rows = riskRunRows(model, { runs });
-      asserts.check("一覧に出る", rows.map((r) => [r.run.typeId, r.top.kind, r.top.days, r.top.afterDrop]), [["TYPE-E", "予告", 15, 16]]);
+      asserts.check("決定表の黄色予告は はい のまま", [m.decision.黄色予告?.days, m.notice?.days], [16, 16]);
+      asserts.check("一覧には出ない", rows.length, 0);
     },
   },
   {
@@ -494,10 +515,10 @@ const SCENARIOS = [
         const c = mountApi().container;
         await sleep(120);
         asserts.check("既定は閉じている", riskTable(c), null);
-        asserts.check("件数は全ラン対象", riskCountText(c), L_COUNT(3, 4));
+        asserts.check("件数は全ラン対象", riskCountText(c), L_COUNT(5, 16));
         await openPanel(c);
         await clickInPanel(c, /すべて展開/);
-        asserts.check("ラン行", groupTypeIds(c), ["TYPE-1", "TYPE-5", "TYPE-6"]);
+        asserts.check("ラン行", groupTypeIds(c), ["TYPE-1", "TYPE-5", "TYPE-4", "TYPE-6", "TYPE-2"]);
         asserts.check("同一性の印は出ない", riskTable(c).textContent.includes(L_MARK), false);
         asserts.check("表示フィルターは無い", c.textContent.includes("表示フィルター適用中"), false);
       } finally { api.restore(); }
