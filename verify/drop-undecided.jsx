@@ -425,6 +425,11 @@ const SCENARIOS = [
       asserts.check("パネルの件数", riskCountText(c), L_COUNT(1, 0));
       await openPanel(c);
       asserts.check("画面のラン行", [groupTypeIds(c), riskGroups(c).map((g) => g.head.textContent.includes(L_MISSING))], [["TYPE-NOREG"], [true]]);
+      // 危険な法規が0件のラン行には内訳・日数を出さない（F-26でA4-lo-past-run-rowから移した。Codexレビュー指摘）
+      const head = riskGroups(c)[0].head.textContent;
+      asserts.check("危険な法規が無いラン行には内訳・日数を出さない",
+        [head.includes("期限超過 0 件"), head.includes("期限前 0 件"), head.includes("予告 0 件"), head.includes("日数不明"), /期限を過ぎて|期限まで|継続車規制日まで/.test(head)],
+        [false, false, false, false, false]);
     },
   },
   {
