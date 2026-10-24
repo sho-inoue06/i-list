@@ -57,7 +57,7 @@ async function verify(){
   d=data();d.cert=[];check("A4 前例なし未来LOは付けられる",view(d).cell.auto.canPlan,true);
   d.cert=setCertPlanned(d.cert,"r902","g901",true);check("A6 ○→計画済み、実績にはならない",[view(d).cell.decision.車両申請,view(d).cell.decision.表示],["発生する（計画済み）","申請発生"]);
   for(const lo of [shift(-1),TODAY,shift(1)]){d.runs[1].lo=lo;const v=view(d).cell.auto;check(`A4/A5/B7 LO=${lo}`,[v.planVisible,v.planned,v.canPlan],[true,true,lo>TODAY]);}
-  const riskBefore=view(d).risks;d.cert=setCertPlanned(d.cert,"r902","g901",false);check("B5 危険一覧の行と件数は○の有無で同じ",view(d).risks,riskBefore);check("A6 ○なしは未計画",view(d).cell.decision.車両申請,"発生する（未計画）");
+  const riskBefore=riskSignature(view(d));d.cert=setCertPlanned(d.cert,"r902","g901",false);check("B5 危険一覧の行と件数は○の有無で同じ",riskSignature(view(d)),riskBefore);check("A6 ○なしは未計画",view(d).cell.decision.車両申請,"発生する（未計画）");
   d=data();d.cert=[record("r902","g901","",true)];
   for(const condition of ["precedent","lo","ck","excluded"]){let hidden=clone(d);if(condition==="precedent")hidden.cert.push(record("r901","g901","DUMMY*01"));if(condition==="lo")hidden.runs[1].lo="";if(condition==="ck")hidden.cert=setCertNumber(hidden.cert,"r902","g901"," DUMMY*02 ");if(condition==="excluded")hidden.decisions=[{runKey:"r902",rid:"g901",state:"対象外"}];
     check(`A10 ${condition}で○を隠し保存値は保持`,[view(hidden).cell.auto.planVisible,hidden.cert.find(c=>c.runKey==="r902").planned],[false,true]);

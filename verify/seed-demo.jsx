@@ -99,6 +99,11 @@ const STATE_MAP = {
   ],
 };
 const STATE_NAMES = Object.keys(STATE_MAP);
+// 危険一覧（F-26）に出るべきセル：期限超過＋黄色予告＋期限前・未取得（＝法規適合必要）のうち、drop済みでないラン。
+// 対応表から検証側で独立に導く（riskOfCell を借りない）。drop済みのランは r1〜r3。
+const DROPPED_RUNS = ["r1", "r2", "r3"];
+const RISK_CELLS = [...STATE_MAP.現在法規不適合, ...STATE_MAP.黄色予告, ...STATE_MAP.法規適合必要]
+  .filter((k) => !DROPPED_RUNS.includes(k.split("×")[0])).sort();
 
 // SEEDが使っている「今日からの日数」。検証側に独立して書く（製品の値と一致することも確かめる）。
 const SEED_OFFSETS = {
@@ -359,18 +364,20 @@ const SCENARIOS = [
   },
   {
     id: "A2-risk-panel",
-    name: "F-10のパネルが、JSON読込なしで件数を出し、開くと drop前のランの不適合と予告だけが見える",
-    expect: "閉じたパネルに「1 ラン・2 件」。開くと DEMO-0003（生産中・不適合1・予告1）だけ。法規適合必要・過去に法規不適合・drop済みランの予告は出ない",
+    name: "危険一覧のパネルが、JSON読込なしで件数を出し、開くと drop前のランの3区分が見える（F-26）",
+    expect: "閉じたパネルに「5 ラン・13 件」。DEMO-0003（期限超過1・予告1）が先頭、続いて期限前のラン。認可番号待ち・過去に法規不適合・drop済みランは出ない。○ありは計画済み",
     async run({ mount, asserts }) {
       const c = mount(undefined).container;
       await sleep(80);
-      asserts.check("閉じたパネルの件数", riskCountText(c), "1 ラン・2 件");
+      // 単体版は前例（F-23）を使うので、認可番号待ちの r5×REG-B・r7×REG-B は実績ありとして渡り、出ない（B1）
+      asserts.check("閉じたパネルの件数", riskCountText(c), "5 ラン・13 件");
       asserts.checkTrue("『該当なし』ではない", !c.textContent.includes("危険な型式ランはありません。"));
       await openPanel(c);
       await clickInPanel(c, /すべて展開/);
       const groups = riskGroups(c);
-      asserts.check("一覧に出るラン", groups.map((g) => g.head.textContent.match(/DEMO-\d{4}/)?.[0]), ["DEMO-0003"]);
-      asserts.check("先頭ランの内訳", groups[0].head.textContent.includes("不適合 1 件・予告 1 件"), true);
+      asserts.check("一覧に出るラン", groups.map((g) => g.head.textContent.match(/DEMO-\d{4}/)?.[0]),
+        ["DEMO-0003", "DEMO-0001", "DEMO-0002", "DEMO-0004", "DEMO-0004"]);
+      asserts.check("先頭ランの内訳", groups[0].head.textContent.includes("期限超過 1 件・期限前 0 件・予告 1 件"), true);
       asserts.check("先頭ランの法規行", groups[0].regs.map((tr) => tr.children[0].textContent.match(/DEMO-REG-[A-Z0-9]+/)?.[0]),
         ["DEMO-REG-C", "DEMO-REG-E"]);
       asserts.checkTrue("不適合が見える（期限を過ぎてn日）", /期限を過ぎて \d+ 日/.test(groups[0].regs[0].textContent));
@@ -378,13 +385,24 @@ const SCENARIOS = [
       // 一覧に並ぶランはすべて drop前（生産中・開発中）であること。**これがF-20の差し戻しで加わった条件**
       const { model, runs } = stateMapOf(SEED);
       const rows = riskRunRows(model, { runs });
-      asserts.check("一覧のラン（キーと生産フェーズ）", rows.map((r) => [r.run.key, r.phase]), [["r6", "生産中"]]);
+      // ここは API版と同じ入口（前例なし）なので、r5×REG-B も期限前に入る（＝対応表の法規適合必要と同じ集合）
+      asserts.check("一覧のラン（キーと生産フェーズ）", rows.map((r) => [r.run.key, r.phase]),
+        [["r6", "生産中"], ["r4", "生産中"], ["r5", "開発中"], ["r7", "開発中"], ["r10", "開発中"]]);
+      asserts.check("一覧のセル＝対応表から導いた集合", rows.flatMap((r) => r.cells.map((m) => `${m.run.key}×${m.reg.id}`)).sort(), RISK_CELLS);
       asserts.check("drop済みのランは1つも並ばない", rows.filter((r) => r.phase === "drop済み").length, 0);
       asserts.checkTrue("drop済みのランは元データには居る（消したのではなく一覧に出ないだけ）",
         runs.some((r) => model.phaseOf(r) === "drop済み"));
-      // 出さないもの（F-10の定義どおり）
+      // 出さないもの・出るもの（F-26）
       const panelText = panelEl(c).textContent;
-      asserts.check("法規適合必要（r7）は一覧に出ない", panelText.includes("DEMO-0004"), false);
+      const regsOf = (i) => groups[i].regs.map((tr) => tr.children[0].textContent.match(/DEMO-REG-[A-Z0-9]+/)?.[0]);
+      asserts.check("法規適合必要（r7・開発中）は期限前で出る。認可番号待ちの REG-B は出ない", regsOf(3), ["DEMO-REG-C", "DEMO-REG-E"]);
+      asserts.check("認可番号待ちの r5×REG-B も出ない", regsOf(2).includes("DEMO-REG-B"), false);
+      const r7E = groups[3].regs[1];
+      asserts.checkTrue("○ありの r7×REG-E は期限前・未取得で計画済みの印", /期限前・未取得/.test(r7E.textContent) && r7E.textContent.includes("計画済み"));
+      asserts.check("○なしのセルに計画済みは付かない", groups[3].regs[0].textContent.includes("計画済み"), false);
+      asserts.checkTrue("drop未定の r10 は drop未定の印つきで期限前（黄色予告に入らない）",
+        groups[4].regs.every((tr) => tr.textContent.includes("drop未定") && tr.textContent.includes("期限前・未取得")));
+      asserts.check("drop済みの 000A は一覧に出ない", panelText.includes("000A"), false);
       asserts.check("過去に法規不適合（r3×REG-B）の 000B は一覧に出ない", panelText.includes("000B"), false);
       // 帳票側には残っている
       asserts.checkTrue("過去に法規不適合はマトリクスには残る", c.textContent.includes("過去に法規不適合（drop済み）"));
@@ -419,7 +437,7 @@ const SCENARIOS = [
   {
     id: "A3-time-travel",
     name: "日が進んでも対応表が変わらない（主要状態が消えない）",
-    expect: "翌日・1か月後・1年後・4年後・27年後に開いても、6状態の対応表とF-10の一覧（1ラン・2件・drop前だけ）が今日と同じになる",
+    expect: "翌日・1か月後・1年後・4年後・27年後に開いても、状態の対応表と危険一覧（5ラン・15件・drop前だけ）が今日と同じになる",
     async run({ asserts }) {
       const base = stateMapOf(SEED).map;
       const days = [1, 2, 7, 29, 30, 31, 40, 151, 166, 200, 365, 366, 1000, 1461, 10000];
@@ -429,8 +447,9 @@ const SCENARIOS = [
         const { map, model, runs } = stateMapOf(buildSeed(t), t);
         if (diffStateMap(map, base).length) broken.push(`${n}日後: ${diffStateMap(map, base).join(" / ")}`);
         const rows = riskRunRows(model, { runs });
-        if (rows.length !== 1 || rows.reduce((n2, r) => n2 + r.cells.length, 0) !== 2)
-          broken.push(`${n}日後の一覧: ${rows.length}ラン・${rows.reduce((n2, r) => n2 + r.cells.length, 0)}件`);
+        const cells = rows.flatMap((r) => r.cells.map((m) => `${m.run.key}×${m.reg.id}`)).sort();
+        if (rows.length !== 5 || JSON.stringify(cells) !== JSON.stringify(RISK_CELLS))
+          broken.push(`${n}日後の一覧: ${rows.length}ラン・${cells.length}件`);
         if (rows.some((r) => r.phase === "drop済み")) broken.push(`${n}日後の一覧にdrop済みのランが出た`);
       }
       asserts.check("対応表が変わった日", broken, []);
@@ -542,8 +561,8 @@ const SCENARIOS = [
         [d2.期限, d2.期限日, d2.超過, d2.生産フェーズ, d2.法規適合必要], ["LO", "2028-01-01", false, "開発中", true]);
       const d3 = decideCell({ lo: "2010-01-01", drop: "2026-01-10", shin: "2000-01-01", kei: "2026-02-01", today: "2026-01-01", side: "継" });
       asserts.check("否・黄色予告（dropの22日後）", [d3.要否, d3.黄色予告?.days, d3.黄色予告?.keiDate], ["否", 22, "2026-02-01"]);
-      asserts.check("riskOfCell は2条件だけ",
-        [riskOfCell(d1, "2026-01-01").kind, riskOfCell(d2, "2026-01-01"), riskOfCell(d3, "2026-01-01").kind], ["不適合", null, "予告"]);
+      asserts.check("riskOfCell は3区分（F-26：法規適合必要は期限前）",
+        [riskOfCell(d1, "2026-01-01").kind, riskOfCell(d2, "2026-01-01").kind, riskOfCell(d3, "2026-01-01").kind], ["不適合", "期限前", "予告"]);
     },
   },
   {
@@ -573,8 +592,9 @@ const SCENARIOS = [
       asserts.check("drop済みの予告が増えると差分が出る",
         diffStateMap(s4.map).filter((x) => x.startsWith("黄色予告に余分")).sort(),
         ["黄色予告に余分: r2×DEMO-REG-C", "黄色予告に余分: r3×DEMO-REG-C"]);
-      asserts.checkTrue("そのとき一覧にdrop済みのランが並ぶ（＝この確認が効いている証拠）",
-        riskRunRows(s4.model, { runs: s4.runs }).some((r) => r.phase === "drop済み"));
+      // F-26 A1：決定表の黄色予告が はい でも、drop済みのランは一覧に並ばない（共通ゲート）
+      asserts.check("それでも一覧にdrop済みのランは並ばない（F-26 A1）",
+        riskRunRows(s4.model, { runs: s4.runs }).some((r) => r.phase === "drop済み"), false);
       // 5. 過去に法規不適合を消す（DEMO-0002にREG-Bの認可番号を足す＝実績ありに変わる）
       const d5 = clone(SEED);
       setTypeCk(d5, "DEMO-0002", "DEMO-REG-B", "DEMO*B00/00*99");

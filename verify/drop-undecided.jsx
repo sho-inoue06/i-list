@@ -64,13 +64,14 @@ const L_OVER = (n) => `期限を過ぎて ${n} 日`;
 //     g802 REG-NEAR … 継続車日は90日後（r803 のLOの30日後＝「LO直後に継続車日が来る」例）
 //     g803 REG-FAR  … 継続車日は2000日後
 //   型式ラン
-//     r801 TYPE-FULL   … LO・drop とも入っている（対照。REG-PASTで法規不適合・100日超過／REG-FARはdropより後なので否）
-//     r802 TYPE-LOPAST … LO 200日前・drop空 → ラン単位の「drop未入力（LO済み）」＋REG-PASTで法規不適合（drop未定の印）
-//     r803 TYPE-LOFUT  … LO 60日後・drop空 → 期限がLOなので超過せず、予告も無い＝一覧に出ない（祥の判断・2026-09-24）
-//     r804 TYPE-CERT   … LO 30日前・drop空・REG-PASTに実績あり → 危険な法規は0件だが、ラン単位の行だけ出る
+//     r801 TYPE-FULL   … LO・drop とも入っている（対照。REG-PASTで法規不適合・100日超過／REG-NEARは期限前／REG-FARはdropより後なので否）
+//     r802 TYPE-LOPAST … LO 200日前・drop空 → ラン単位の「drop未入力（LO済み）」＋REG-PASTで法規不適合（drop未定の印）＋残りは期限前
+//     r803 TYPE-LOFUT  … LO 60日後・drop空 → 期限がLOなので超過せず、予告も無い。F-26 から全法規が期限前・未取得で出る（印は無い）
+//     r804 TYPE-CERT   … LO 30日前・drop空・REG-PASTに実績あり → 実績ありのREG-PASTは出ず、残りは期限前。ラン単位の行も出る
 //     r805 TYPE-NOLO   … LO空・dropあり → 全法規が判定不能・一覧に出ない
 //     r806 TYPE-NOBOTH … LO空・drop空   → 全法規が判定不能（drop未定の印は付けない）・一覧に出ない
-//     r807 TYPE-LOTODAY… LO＝今日・drop空・REG-PASTに実績あり → LO当日は過去側＝ラン単位の行が出る（危険な法規は0件）
+//     r807 TYPE-LOTODAY… LO＝今日・drop空・REG-PASTに実績あり → LO当日は過去側＝ラン単位の印が付く（残りの法規は期限前）
+// F-26 で法規適合必要（期限前・未取得）も一覧に出るようになったため、一覧の期待値は F-26 の定義で書いてある。
 const D = { LONG_AGO: shift(-3650), FAR: shift(3650), PAST: shift(-100), NEAR: shift(90), FARKEI: shift(2000) };
 const MAIN = {
   runs: [
@@ -265,25 +266,29 @@ const SCENARIOS = [
   {
     id: "A4-lo-past-run-row",
     name: "A4：LO過去（当日を含む）・drop空は、日付条件と関係なくラン単位の「drop未入力（LO済み）」行を出す",
-    expect: "r802（法規不適合あり）・r804（危険な法規0件）・r807（LO当日）にラン単位の印。法規単位の行は drop＝∞ で日付条件に通した結果だけ（r802×REG-PAST）で、drop未定の印つき",
+    expect: "r802（法規不適合あり）・r804・r807（LO当日）にラン単位の印。法規単位の行は drop＝∞ で決定表に通した結果だけ（r802×REG-PAST の不適合＋期限前）で、drop未定の印つき",
     async run({ mount, asserts }) {
       const { model, runs } = modelOf(MAIN);
       const rows = riskRunRows(model, { runs });
       const by = (rk) => rows.find((r) => r.run.key === rk);
-      asserts.check("一覧に出るラン", rows.map((r) => r.run.key), ["r801", "r802", "r804", "r807"]);
-      asserts.check("ラン単位の印", rows.map((r) => [r.run.key, r.alert]), [["r801", null], ["r802", "drop未入力"], ["r804", "drop未入力"], ["r807", "drop未入力"]]);
-      asserts.check("r802 の法規行は REG-PAST の不適合だけ（REG-NEAR・REG-FAR は超過前なので出ない）",
-        by("r802").cells.map((m) => [m.reg.id, m.risk.kind, m.decision.drop未定]), [["REG-PAST", "不適合", true]]);
-      asserts.check("r804・r807 は危険な法規0件（実績あり・超過前）", [by("r804").cells.length, by("r807").cells.length], [0, 0]);
+      asserts.check("一覧に出るラン", rows.map((r) => r.run.key), ["r801", "r802", "r803", "r804", "r807"]);
+      asserts.check("ラン単位の印", rows.map((r) => [r.run.key, r.alert]),
+        [["r801", null], ["r802", "drop未入力"], ["r803", null], ["r804", "drop未入力"], ["r807", "drop未入力"]]);
+      asserts.check("r802 の法規行は REG-PAST の不適合と、超過前の REG-NEAR・REG-FAR の期限前",
+        by("r802").cells.map((m) => [m.reg.id, m.risk.kind, m.decision.drop未定]),
+        [["REG-PAST", "不適合", true], ["REG-NEAR", "期限前", true], ["REG-FAR", "期限前", true]]);
+      asserts.check("r804・r807 は実績ありの REG-PAST を出さない（残りは期限前）",
+        [by("r804").cells.map((m) => [m.reg.id, m.risk.kind]), by("r807").cells.map((m) => [m.reg.id, m.risk.kind])],
+        [[["REG-NEAR", "期限前"], ["REG-FAR", "期限前"]], [["REG-NEAR", "期限前"], ["REG-FAR", "期限前"]]]);
       const c = await mountWith(mount, MAIN);
       await openPanel(c);
       await clickInPanel(c, /すべて展開/);
-      asserts.check("画面のラン行", groupTypeIds(c), ["TYPE-FULL", "TYPE-LOPAST", "TYPE-CERT", "TYPE-LOTODAY"]);
+      asserts.check("画面のラン行", groupTypeIds(c), ["TYPE-FULL", "TYPE-LOPAST", "TYPE-LOFUT", "TYPE-CERT", "TYPE-LOTODAY"]);
       const g = riskGroups(c);
-      asserts.check("ラン行の印", g.map((x) => x.head.textContent.includes(L_MISSING)), [false, true, true, true]);
-      asserts.check("危険な法規が無いラン行には内訳・日数を出さない",
-        [g[2].head.textContent.includes("不適合 0 件"), g[2].head.textContent.includes("日数不明")], [false, false]);
-      asserts.check("法規行の数", g.map((x) => x.regs.length), [1, 1, 0, 0]);
+      asserts.check("ラン行の印", g.map((x) => x.head.textContent.includes(L_MISSING)), [false, true, false, true, true]);
+      // 危険な法規が0件のラン行（内訳・日数を出さない）は R1-no-regs が確かめる（このデータでは F-26 から全ランに法規行がある）
+      asserts.checkTrue("印のあるラン行にも内訳が出る", g[3].head.textContent.includes("期限超過 0 件・期限前 2 件・予告 0 件"));
+      asserts.check("法規行の数", g.map((x) => x.regs.length), [2, 3, 3, 2, 2]);
       const regRow = g[1].regs[0].textContent;
       asserts.checkTrue("r802 の法規行に drop未定 の印と超過日数", regRow.includes(L_UNDECIDED) && regRow.includes(L_OVER(100)));
       asserts.check("LO・dropありのランの法規行には drop未定 が付かない", g[0].regs[0].textContent.includes(L_UNDECIDED), false);
@@ -291,21 +296,22 @@ const SCENARIOS = [
   },
   {
     id: "A4-B4-lo-future",
-    name: "A4・B4：LO未来・drop空は一律には出さず、drop＝∞ を既存の2条件に通した結果だけを出す",
-    expect: "r803 は期限がLOで超過せず、dropの後の30日窓も無いので出ない（REG-NEAR＝LOの30日後に継続車日が来る例も含む。2026-09-24 祥の判断で条件どおり）。ラン単位の印も付かない",
+    name: "A4・B4：LO未来・drop空は一律には出さず、drop＝∞ を決定表に通した結果だけを出す",
+    expect: "r803 は期限がLOで超過せず、dropの後の30日窓も無いので、不適合・予告には出ない。F-26 から法規適合必要は期限前・未取得で出る。ラン単位の印は付かない",
     async run({ asserts }) {
       const { model, runs, cell } = modelOf(MAIN);
-      asserts.check("r803 は一覧に出ない", riskRunRows(model, { runs }).some((r) => r.run.key === "r803"), false);
+      const row803 = riskRunRows(model, { runs }).find((r) => r.run.key === "r803");
+      asserts.check("r803 は期限前・未取得だけで出る", [row803?.bad, row803?.due, row803?.warn], [0, 3, 0]);
       asserts.check("r803 にラン単位の印は付かない", model.alertOf(runs.find((r) => r.key === "r803")), null);
-      asserts.check("r803×REG-NEAR は 法規適合必要（LO後の継続車日が期限）・危険ではない",
-        [cell("r803", "g802").decision.法規適合必要, cell("r803", "g802").decision.期限, cell("r803", "g802").risk], [true, "規制日", null]);
-      asserts.check("r803×REG-PAST は 法規適合必要（期限＝LO）・危険ではない",
-        [cell("r803", "g801").decision.法規適合必要, cell("r803", "g801").decision.期限, cell("r803", "g801").risk], [true, "LO", null]);
+      asserts.check("r803×REG-NEAR は 法規適合必要（LO後の継続車日が期限）＝期限前",
+        [cell("r803", "g802").decision.法規適合必要, cell("r803", "g802").decision.期限, cell("r803", "g802").risk?.kind, cell("r803", "g802").risk?.days], [true, "規制日", "期限前", 90]);
+      asserts.check("r803×REG-PAST は 法規適合必要（期限＝LO）＝期限前",
+        [cell("r803", "g801").decision.法規適合必要, cell("r803", "g801").decision.期限, cell("r803", "g801").risk?.kind, cell("r803", "g801").risk?.days], [true, "LO", "期限前", 60]);
       // 日付条件に当たる組み合わせ（LO過去側へ時間が進んだ場合）は消えない：同じランを「LOの31日後」で見ると法規不適合で出る
       const later = modelOf(MAIN, shift(91));
       const rowLater = riskRunRows(later.model, { runs: later.runs }).find((r) => r.run.key === "r803");
       asserts.check("今日＝91日後（LO過去・REG-NEAR超過）なら REG-NEAR が不適合で出て、ラン単位の印も付く",
-        [rowLater?.alert, rowLater?.cells.map((m) => [m.reg.id, m.risk.kind])], ["drop未入力", [["REG-PAST", "不適合"], ["REG-NEAR", "不適合"]]]);
+        [rowLater?.alert, rowLater?.cells.map((m) => [m.reg.id, m.risk.kind])], ["drop未入力", [["REG-PAST", "不適合"], ["REG-NEAR", "不適合"], ["REG-FAR", "期限前"]]]);
     },
   },
   {
@@ -383,7 +389,8 @@ const SCENARIOS = [
       const alertAt = (lo) => { const { model, runs } = modelOf(at(lo), T); return riskRunRows(model, { runs }).map((r) => r.alert); };
       asserts.check("LO＝T−1（過去）", alertAt("2031-03-14"), ["drop未入力"]);
       asserts.check("LO＝T（当日は過去側）", alertAt("2031-03-15"), ["drop未入力"]);
-      asserts.check("LO＝T＋1（未来）", alertAt("2031-03-16"), []);
+      // F-26：LO未来でも要・未超過のセルは期限前で行が出る。ラン単位の印だけが無い
+      asserts.check("LO＝T＋1（未来）", alertAt("2031-03-16"), [null]);
       // 予告期間：dropあり（T＋5、継続車日はその15日後）なら黄色予告、drop空（∞）では窓が無いので要・超過前
       const withDrop = modelOf(at("2031-01-01", "2031-03-20"), T).cell("r851", "g851").decision;
       const noDrop = modelOf(at("2031-01-01", ""), T).cell("r851", "g851").decision;
@@ -423,19 +430,19 @@ const SCENARIOS = [
   {
     id: "B6-one-row-per-run",
     name: "B6：ラン単位の「drop未入力（LO済み）」行は1ランにつき1行で、法規単位の件数に混ざらない",
-    expect: "法規が3つあってもラン行は1本・印は1つ。パネルの件数は「4 ラン・2 件」（件＝法規単位の危険だけ：r801×REG-PAST・r802×REG-PAST）",
+    expect: "法規が3つあってもラン行は1本・印は1つ。パネルの件数は「5 ラン・12 件」（件＝法規単位の区分に入ったセルだけ。ラン単位の印は数えない）",
     async run({ mount, asserts }) {
       const { model, runs } = modelOf(MAIN);
       const rows = riskRunRows(model, { runs });
       asserts.check("ランごとに1行", rows.length, new Set(rows.map((r) => r.run)).size);
-      asserts.check("法規単位の件数", rows.reduce((n, r) => n + r.cells.length, 0), 2);
+      asserts.check("法規単位の件数", rows.reduce((n, r) => n + r.cells.length, 0), 12);
       asserts.check("ラン単位の印は cells に入らない", rows.flatMap((r) => r.cells).every((m) => !!m.risk), true);
       const c = await mountWith(mount, MAIN);
-      asserts.check("パネルの件数（閉じた状態）", riskCountText(c), L_COUNT(4, 2));
+      asserts.check("パネルの件数（閉じた状態）", riskCountText(c), L_COUNT(5, 12));
       await openPanel(c);
       await clickInPanel(c, /すべて展開/);
       const g = riskGroups(c);
-      asserts.check("印はラン行に1つずつ", g.map((x) => (x.head.textContent.match(/drop未入力（LO済み）/g) || []).length), [0, 1, 1, 1]);
+      asserts.check("印はラン行に1つずつ", g.map((x) => (x.head.textContent.match(/drop未入力（LO済み）/g) || []).length), [0, 1, 0, 1, 1]);
       asserts.check("印は法規行に出ない", g.flatMap((x) => x.regs).some((tr) => tr.textContent.includes(L_MISSING)), false);
     },
   },
