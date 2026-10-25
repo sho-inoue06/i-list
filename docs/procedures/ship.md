@@ -1,4 +1,4 @@
-版：2026-10-23
+版：2026-10-26
 
 # 出荷の手順
 
@@ -18,7 +18,7 @@
 ## 手順
 
 1. `git push -u origin <branch>`
-2. `gh pr create --base main --head <branch>`（本文は最終報告の要約）
+2. `gh pr create --base main --head <branch>`（本文は最後の停止報告を、implement.md の最終報告の形式のまま載せる。要約しない）
 3. PRが mergeable で、base が main、head の SHA が承認時のHEADと一致することを確認する。コンフリクト・base違い・SHA不一致・チェック失敗のどれかがあれば、マージせず停止する
 4. `gh pr merge --squash --delete-branch --match-head-commit <承認時のHEAD>`（確認後にheadが動いていたらマージされない。失敗したら停止する）
 5. `git switch main` → `git pull --ff-only origin main`。ff-onlyで失敗したら停止する（競合は解消しない）
