@@ -198,12 +198,15 @@ async function clickInPanel(c, re) {
   if (!b) throw new Error(`パネル内のボタンが見つかりません: ${re}`);
   b.click(); await sleep(40);
 }
+// F-27：表は「区分見出し → ラン行 → 法規行」。区分見出しは飛ばし、ラン行にその区分（section）を持たせる
 function riskGroups(c) {
   const t = panelEl(c).querySelector("table");
   if (!t) return [];
   const out = [];
+  let section = null;
   for (const tr of t.querySelectorAll("tbody > tr")) {
-    if (tr.children.length === 1) out.push({ head: tr, regs: [] });
+    if (tr.hasAttribute("data-risk-section")) section = tr.getAttribute("data-risk-section");
+    else if (tr.hasAttribute("data-risk-run")) out.push({ section, head: tr, regs: [] });
     else if (out.length) out[out.length - 1].regs.push(tr);
   }
   return out;
@@ -365,7 +368,7 @@ const SCENARIOS = [
   {
     id: "A2-risk-panel",
     name: "危険一覧のパネルが、JSON読込なしで件数を出し、開くと drop前のランの3区分が見える（F-26）",
-    expect: "閉じたパネルに「5 ラン・13 件」。DEMO-0003（期限超過1・予告1）が先頭、続いて期限前のラン。認可番号待ち・過去に法規不適合・drop済みランは出ない。○ありは計画済み",
+    expect: "閉じたパネルに「5 ラン・13 件」。期限超過に DEMO-0003、期限前・未取得に4ラン、黄色予告に DEMO-0003（F-27の区分見出しごと）。認可番号待ち・過去に法規不適合・drop済みランは出ない。○ありは計画済み",
     async run({ mount, asserts }) {
       const c = mount(undefined).container;
       await sleep(80);
@@ -375,13 +378,14 @@ const SCENARIOS = [
       await openPanel(c);
       await clickInPanel(c, /すべて展開/);
       const groups = riskGroups(c);
-      asserts.check("一覧に出るラン", groups.map((g) => g.head.textContent.match(/DEMO-\d{4}/)?.[0]),
-        ["DEMO-0003", "DEMO-0001", "DEMO-0002", "DEMO-0004", "DEMO-0004"]);
-      asserts.check("先頭ランの内訳", groups[0].head.textContent.includes("期限超過 1 件・期限前 0 件・予告 1 件"), true);
-      asserts.check("先頭ランの法規行", groups[0].regs.map((tr) => tr.children[0].textContent.match(/DEMO-REG-[A-Z0-9]+/)?.[0]),
-        ["DEMO-REG-C", "DEMO-REG-E"]);
+      // F-27：区分ごとにラン行が出る。DEMO-0003 は期限超過と黄色予告の両方に出る
+      asserts.check("一覧に出るラン（区分ごと）", groups.map((g) => [g.section, g.head.textContent.match(/DEMO-\d{4}/)?.[0]]),
+        [["不適合", "DEMO-0003"], ["期限前", "DEMO-0001"], ["期限前", "DEMO-0002"], ["期限前", "DEMO-0004"], ["期限前", "DEMO-0004"], ["予告", "DEMO-0003"]]);
+      asserts.check("先頭のラン行はその区分の件数", groups[0].head.textContent.includes("1 件"), true);
+      const regIds = (g) => g.regs.map((tr) => tr.children[0].textContent.match(/DEMO-REG-[A-Z0-9]+/)?.[0]);
+      asserts.check("DEMO-0003 の法規行（期限超過／黄色予告）", [regIds(groups[0]), regIds(groups[5])], [["DEMO-REG-C"], ["DEMO-REG-E"]]);
       asserts.checkTrue("不適合が見える（期限を過ぎてn日）", /期限を過ぎて \d+ 日/.test(groups[0].regs[0].textContent));
-      asserts.checkTrue("予告が見える（継続車規制日まで n 日）", /継続車規制日まで \d+ 日（dropの \d+ 日後）/.test(groups[0].regs[1].textContent));
+      asserts.checkTrue("予告が見える（継続車規制日まで n 日）", /継続車規制日まで \d+ 日（dropの \d+ 日後）/.test(groups[5].regs[0].textContent));
       // 一覧に並ぶランはすべて drop前（生産中・開発中）であること。**これがF-20の差し戻しで加わった条件**
       const { model, runs } = stateMapOf(SEED);
       const rows = riskRunRows(model, { runs });

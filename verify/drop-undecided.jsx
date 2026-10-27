@@ -9,6 +9,8 @@
 //   → http://127.0.0.1:5173/verify/drop-undecided.html
 //
 // 完成条件 A1〜A5・B1〜B6（Notion「Iリスト｜バックログ」F-24）を、ケースIDの先頭で対応づける。
+// F-27 で表が「区分見出し → ラン行 → 法規行」になり、drop未入力の印は区分見出しより上の別枠へ移ったため、
+// 画面の並び・印の位置の期待値を書き直してある（判定・件数の期待値は変えていない）。
 // A5（決定表の総当たり）は verify/decision-table.html の A5-F24-drop-cases で確かめる。
 //
 // 画面を通すケースは、F-13と同じく実行時の端末ローカル日付から相対日付を作る（製品の「今日」は端末日付で固定できない）。
@@ -109,17 +111,24 @@ async function clickInPanel(c, re) {
   if (!b) throw new Error(`パネル内のボタンが見つかりません: ${re}`);
   b.click(); await sleep(40);
 }
+// F-27：表は「区分見出し → ラン行 → 法規行」。区分見出しは飛ばし、ラン行にその区分（section）を持たせる
 function riskGroups(c) {
   const t = riskTable(c);
   if (!t) return [];
   const out = [];
+  let section = null;
   for (const tr of t.querySelectorAll("tbody > tr")) {
-    if (tr.children.length === 1) out.push({ head: tr, regs: [] });
+    if (tr.hasAttribute("data-risk-section")) section = tr.getAttribute("data-risk-section");
+    else if (tr.hasAttribute("data-risk-run")) out.push({ section, head: tr, regs: [] });
     else if (out.length) out[out.length - 1].regs.push(tr);
   }
   return out;
 }
 const groupTypeIds = (c) => riskGroups(c).map((g) => g.head.textContent.match(/TYPE-[A-Z]+/)?.[0] || "");
+const groupSig = (c) => riskGroups(c).map((g) => [g.section, g.head.textContent.match(/TYPE-[A-Z]+/)?.[0] || ""]);
+// F-27 A7：drop未入力のランは区分見出しより上の別枠に出る
+const alertRuns = (c) => [...(panelEl(c).querySelector("[data-risk-alerts]")?.querySelectorAll("[data-risk-alert-run]") || [])];
+const alertTypeIds = (c) => alertRuns(c).map((x) => x.textContent.match(/TYPE-[A-Z]+/)?.[0] || "");
 // 帳票セル（行＝法規、列＝表示中の型式ラン）。先頭tdは法規名なので +1。
 function matrixCellEl(c, regRow, runCol) {
   const td = matrixTable(c).querySelector("tbody").children[regRow]?.children[runCol + 1];
@@ -283,12 +292,17 @@ const SCENARIOS = [
       const c = await mountWith(mount, MAIN);
       await openPanel(c);
       await clickInPanel(c, /すべて展開/);
-      asserts.check("画面のラン行", groupTypeIds(c), ["TYPE-FULL", "TYPE-LOPAST", "TYPE-LOFUT", "TYPE-CERT", "TYPE-LOTODAY"]);
+      // F-27：区分ごとにラン行が出る（複数区分にまたがるランは各区分に出る）
+      asserts.check("画面のラン行（区分ごと）", groupSig(c), [["不適合", "TYPE-FULL"], ["不適合", "TYPE-LOPAST"],
+        ["期限前", "TYPE-LOFUT"], ["期限前", "TYPE-FULL"], ["期限前", "TYPE-LOPAST"], ["期限前", "TYPE-CERT"], ["期限前", "TYPE-LOTODAY"]]);
       const g = riskGroups(c);
-      asserts.check("ラン行の印", g.map((x) => x.head.textContent.includes(L_MISSING)), [false, true, false, true, true]);
-      // 危険な法規が0件のラン行（内訳・日数を出さない）は R1-no-regs が確かめる（このデータでは F-26 から全ランに法規行がある）
-      asserts.checkTrue("印のあるラン行にも内訳が出る", g[3].head.textContent.includes("期限超過 0 件・期限前 2 件・予告 0 件"));
-      asserts.check("法規行の数", g.map((x) => x.regs.length), [2, 3, 3, 2, 2]);
+      // F-27 A7：ラン単位の印は区分見出しより上の別枠に出る（区分の中のラン行には付けない）
+      asserts.check("別枠のラン", alertTypeIds(c), ["TYPE-LOPAST", "TYPE-CERT", "TYPE-LOTODAY"]);
+      asserts.check("別枠のラン行に印", alertRuns(c).map((x) => x.textContent.includes(L_MISSING)), [true, true, true]);
+      asserts.check("区分のラン行には印を付けない", g.map((x) => x.head.textContent.includes(L_MISSING)), [false, false, false, false, false, false, false]);
+      // 危険な法規が0件のラン（別枠にだけ出る）は R1-no-regs が確かめる（このデータでは F-26 から全ランに法規行がある）
+      asserts.checkTrue("印のあるランも区分のラン行にはその区分の件数が出る", g[5].head.textContent.includes("2 件"));
+      asserts.check("法規行の数", g.map((x) => x.regs.length), [1, 1, 3, 1, 2, 2, 2]);
       const regRow = g[1].regs[0].textContent;
       asserts.checkTrue("r802 の法規行に drop未定 の印と超過日数", regRow.includes(L_UNDECIDED) && regRow.includes(L_OVER(100)));
       asserts.check("LO・dropありのランの法規行には drop未定 が付かない", g[0].regs[0].textContent.includes(L_UNDECIDED), false);
@@ -424,9 +438,10 @@ const SCENARIOS = [
       const c = await mountWith(mount, { runs: [{ ...runs[0], lo: shift(-1) }, { ...runs[3], lo: shift(-10), drop: shift(10) }], regs: [], cert: {} });
       asserts.check("パネルの件数", riskCountText(c), L_COUNT(1, 0));
       await openPanel(c);
-      asserts.check("画面のラン行", [groupTypeIds(c), riskGroups(c).map((g) => g.head.textContent.includes(L_MISSING))], [["TYPE-NOREG"], [true]]);
+      // F-27 A7：法規行が無いランは、区分には出ず別枠にだけ出る
+      asserts.check("画面のラン行", [groupTypeIds(c), alertTypeIds(c), alertRuns(c).map((x) => x.textContent.includes(L_MISSING))], [[], ["TYPE-NOREG"], [true]]);
       // 危険な法規が0件のラン行には内訳・日数を出さない（F-26でA4-lo-past-run-rowから移した。Codexレビュー指摘）
-      const head = riskGroups(c)[0].head.textContent;
+      const head = alertRuns(c)[0].textContent;
       asserts.check("危険な法規が無いラン行には内訳・日数を出さない",
         [head.includes("期限超過 0 件"), head.includes("期限前 0 件"), head.includes("予告 0 件"), head.includes("日数不明"), /期限を過ぎて|期限まで|継続車規制日まで/.test(head)],
         [false, false, false, false, false]);
@@ -447,7 +462,9 @@ const SCENARIOS = [
       await openPanel(c);
       await clickInPanel(c, /すべて展開/);
       const g = riskGroups(c);
-      asserts.check("印はラン行に1つずつ", g.map((x) => (x.head.textContent.match(/drop未入力（LO済み）/g) || []).length), [0, 1, 0, 1, 1]);
+      // F-27 A7：印は別枠のラン行に1つずつ。区分のラン行には付けない
+      asserts.check("印は別枠のラン行に1つずつ", alertRuns(c).map((x) => (x.textContent.match(/drop未入力（LO済み）/g) || []).length), [1, 1, 1]);
+      asserts.check("区分のラン行には印が出ない", g.some((x) => x.head.textContent.includes(L_MISSING)), false);
       asserts.check("印は法規行に出ない", g.flatMap((x) => x.regs).some((tr) => tr.textContent.includes(L_MISSING)), false);
     },
   },

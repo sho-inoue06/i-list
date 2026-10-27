@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>危険一覧の区分見出し・並び・開閉（F-27） 検証ハーネス（ダミー専用）</title>
+    <style>html, body { margin: 0; min-height: 100%; } body { background: #0c1623; }</style>
+  </head>
+  <body>
+    <!--
+      F-27（危険一覧の並び・折りたたみ）の検証ページ。ダミーデータのみ。
+      実APIサーバ・実DB（data/ilist.db）には接続しない（API版のケースは fetch をモックする）。
+      保存HTMLを実ファイルで開き直す確認（B1・B2）は verify/sections-file.mjs が行う。
+
+      実行方法（npm run dev は使わない：APIサーバと既存DBを開いてしまうため）：
+        node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
+        → http://127.0.0.1:5173/verify/sections.html
+    -->
+    <div id="runner"></div>
+    <script type="module" src="/verify/sections.jsx"></script>
+  </body>
+</html>
