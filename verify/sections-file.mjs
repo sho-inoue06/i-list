@@ -47,7 +47,9 @@ check("A3 開いた直後は期限超過・黄色予告が展開、期限前は�
 // 並び・開閉の操作（区分の開閉・すべて展開・すべてたたむ）
 await clickSection("期限前");await clickSection("不適合");await click("すべて展開");
 check("操作後：すべて展開",await sections(),[["不適合",3,3],["期限前",2,2],["予告",1,1]]);
-await click("すべてたたむ");await clickSection("不適合");
+await click("すべてたたむ");
+// 期限超過を閉じた状態で保存する（Codexレビュー指摘2：閉じたまま保存しないと B2 を確かめられない）
+check("保存前：期限超過を含む全区分が閉じている",await sections(),[["不適合",0,0],["期限前",0,0],["予告",0,0]]);
 const json1=await download("JSONに書き出し",".json");const html1=await download("データ入りHTMLを保存",".html");
 check("B1 並び・開閉の操作でJSON書き出しが変わらない",readFileSync(json1,"utf8"),readFileSync(json0,"utf8"));
 const boot0=await bootOf(html0),boot1=await bootOf(html1);   // 最後に html1 を開いた状態で終わる
