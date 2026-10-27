@@ -57,7 +57,10 @@ export const TEXT = {
     該当なし:  "危険な型式ランはありません。",
     // 3区分の呼び名（F-26）。kind（不適合／期限前／予告）ごとに1つ。
     区分: { 不適合: "期限超過", 期限前: "期限前・未取得", 予告: "黄色予告" },
-    内訳:     (bad, due, warn) => `期限超過 ${bad} 件・期限前 ${due} 件・予告 ${warn} 件`,
+    // F-27。区分見出しと、区分の中のラン行に出す件数（その区分に入った法規行の数）。0件も「0 件」で出す。
+    区分件数:  (n) => `${n} 件`,
+    // F-27 A7。drop未入力のランを、区分見出しより上にまとめて出す別枠の見出し。
+    drop未入力枠: "入力漏れ（LOを迎えたのにdropが空）",
     // 日数の主語は状態ごとに変える（A3）。「規制日まで何日超過」のような混ざった言い方はしない。
     超過日数:  (n) => `期限を過ぎて ${n} 日`,
     期限前日数: (n) => `期限まで ${n} 日`,
@@ -1412,6 +1415,7 @@ const cmpUrgency = (a, b) => {
 };
 
 // 型式ラン単位で束ねた一覧の行（A2）。1行＝1型式ラン、展開するとそのランの危険な法規が並ぶ。
+// F-27 から画面は riskSections（区分ごと）で描き、ここはパネル見出しの「n ラン・n 件」に使う。
 //
 //   model … buildCellModel の集約結果（帳票のセルと同じもの）
 //   runs  … 並べる対象の型式ラン（F-02の表示フィルターを通した visibleRuns。省略＝全ラン）。
@@ -1460,6 +1464,64 @@ export function riskRunRows(model, { runs = null } = {}) {
   }
   rows.sort(cmpUrgency);
   return rows;
+}
+
+// ───────────────────────────────────────────────
+// 危険一覧の区分見出し（F-27）
+//
+// riskRunRows と同じ集約結果を、「区分 → 型式ラン → 法規行」の形に組み直すだけである。
+// **セルの所属は riskOfCell の kind のまま**（ここで判定・除外を足さない）。
+//
+//   sections … RISK_KINDS の順（期限超過 → 期限前・未取得 → 黄色予告）に必ず3つ。0件の区分も返す（A1）
+//     count  … その区分に入った法規行の数（表示中のランだけ。判断済みも数える。A4）
+//     rows   … その区分の法規行を持つ型式ラン。1つのランが複数の区分に出ることがある（A2）
+//              cells はそのランのうち、その区分の法規行だけ
+//   alerts   … drop未入力（F-24 A4）のラン。区分とは別枠で、件数に混ざらない（A7・B3）
+//
+// ■ 並び（A5・A6）。日数は riskOfCell の切迫度（urgency）をそのまま使う。
+//   区分の中の法規行 … 切迫度の小さい順。期限前は同じ期限なら未計画 → 計画済み。日数が読めない行は末尾
+//   ランどうし       … そのランの区分内で日数が読める先頭の行で比べる。読める行が無いランは区分の末尾
+//   同順位           … 元の並び（ランの入力順 × 法規の順）のまま（sort は安定）
+// 計画済みは決定表の車両申請を読むだけで、区分・件数には効かない（○の付け外しで並びだけが変わりうる。B4）。
+// ───────────────────────────────────────────────
+const isPlanned = (m) => m.decision.車両申請 === "発生する（計画済み）";
+const cmpInSection = (a, b) => {
+  if (a.risk.urgency === null || b.risk.urgency === null) {
+    return (a.risk.urgency === null) - (b.risk.urgency === null);
+  }
+  if (a.risk.urgency !== b.risk.urgency) return a.risk.urgency - b.risk.urgency;
+  if (a.risk.kind === "期限前") return isPlanned(a) - isPlanned(b);
+  return 0;
+};
+
+export function riskSections(model, { runs = null } = {}) {
+  const allow = runs ? new Set(runs) : null;
+  // ランの順は model のランの順（riskRunRows と同じ）。同じランは1回だけ。
+  const order = [...new Set(model.runs || model.list.map((m) => m.run))].filter((run) => !allow || allow.has(run));
+  const cellsOf = new Map();
+  for (const m of model.list) {
+    if (!m.risk) continue;
+    if (!cellsOf.has(m.run)) cellsOf.set(m.run, []);
+    cellsOf.get(m.run).push(m);
+  }
+  const sections = RISK_KINDS.map((kind) => {
+    const rows = [];
+    for (const run of order) {
+      const cells = (cellsOf.get(run) || []).filter((m) => m.risk.kind === kind);
+      if (cells.length === 0) continue;
+      cells.sort(cmpInSection);
+      // 日数が読める先頭の行（読めない行は並べ替えで末尾に来ているので、先頭が読めなければ全部読めない）
+      const top = cells[0].risk.urgency === null ? null : cells[0];
+      rows.push({
+        run, phase: model.phaseOf(run), cells, top: top ? top.risk : null, head: top,
+        unconfirmed: cells.some((m) => m.decision.根拠未確認),
+      });
+    }
+    rows.sort((a, b) => (!a.head || !b.head) ? (!a.head) - (!b.head) : cmpInSection(a.head, b.head));
+    return { kind, count: rows.reduce((n, r) => n + r.cells.length, 0), rows };
+  });
+  const alerts = order.filter((run) => model.alertOf?.(run)).map((run) => ({ run, phase: model.phaseOf(run) }));
+  return { sections, alerts };
 }
 
 // 採番の上限。生成できる範囲と読み込める範囲を同じ値にそろえる。
@@ -2335,8 +2397,8 @@ function ColumnFilterBar({ projectOptions, typeOptions, selProjects, setSelProje
 
 // ===== 危険な型式ランの一覧（F-10）：マトリクス上部の開閉パネル =====
 //
-// **ここでは判定も日付比較もしない**（A5）。buildCellModel の集約結果を riskRunRows で
-// 束ねて並べたものを、そのまま描くだけである。文言はすべて TEXT（F-18の辞書）から引く。
+// **ここでは判定も日付比較もしない**（A5）。buildCellModel の集約結果を riskSections（F-27）で
+// 区分ごとに束ねて並べたものを、そのまま描くだけである（見出しの件数は riskRunRows）。文言はすべて TEXT（F-18の辞書）から引く。
 // 色も既存の系統をそのまま使う（赤＝法規不適合・橙＝黄色予告・青＝同一性）。
 //
 // 開閉・展開は一時的なUI状態で、保存形式にも dirty にも関与しない（既定は閉じた状態＝A6）。
@@ -2422,19 +2484,52 @@ function DropMissingMark() {
   );
 }
 
-function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
+// 区分の開閉の既定（F-27 A3）。期限超過と黄色予告は開き、件数の多い期限前・未取得はたたむ。
+// 一時的なUI状態で、保存形式にも dirty にも関与しない。パネルを開き直すたびにこの既定へ戻す（保存HTMLを開いても同じ）。
+const RISK_SECTION_DEFAULT = { 不適合: true, 期限前: false, 予告: true };
+
+// 型式ランの見出し（プロジェクト・型式・生産フェーズ・LO/drop）。区分の中のラン行と、drop未入力の別枠で同じものを使う。
+function RiskRunLabel({ run, phase }) {
+  return <>
+    <span style={{ fontSize:10.5, color:"#8fa3b8" }}>{run.gen || "（コード未設定）"}</span>
+    <span style={{ fontFamily:"ui-monospace,monospace", fontWeight:700 }}>{run.typeId || "（型式未設定）"}</span>
+    <span style={{ fontSize:9.5, padding:"1px 6px", borderRadius:999, color:"#8fa3b8",
+      border:`1px solid ${LINE}`, background:"rgba(90,107,125,0.12)", fontWeight:700 }}>
+      {TEXT.phase[phase] || ""}</span>
+    <span style={{ fontSize:9.5, color:MUTE, fontFamily:"ui-monospace,monospace" }}>
+      LO {fmt(run.lo)}・drop {fmt(run.drop)}</span>
+  </>;
+}
+
+function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState([]);   // 展開中の型式ラン（オブジェクトで持つ。key は重複しうる）
+  const [sectionOpen, setSectionOpen] = useState(RISK_SECTION_DEFAULT);
+  // 展開中の型式ラン（区分ごと）。同じランが複数の区分に出るので「区分＋ランのオブジェクト」で持つ（key は重複しうる）。
+  const [expanded, setExpanded] = useState([]);
   const cellCount = rows.reduce((n, r) => n + r.cells.length, 0);
-  const isOpen = (run) => expanded.includes(run);
-  const toggle = (run) => setExpanded(isOpen(run) ? expanded.filter((x) => x !== run) : [...expanded, run]);
-  const allOpen = rows.length > 0 && rows.every((r) => isOpen(r.run));
+  const isOpen = (kind, run) => expanded.some((x) => x.kind === kind && x.run === run);
+  const toggle = (kind, run) => setExpanded(isOpen(kind, run)
+    ? expanded.filter((x) => !(x.kind === kind && x.run === run)) : [...expanded, { kind, run }]);
+  const toggleSection = (kind) => setSectionOpen({ ...sectionOpen, [kind]: !sectionOpen[kind] });
+  const togglePanel = () => {
+    // 開き直すと既定に戻す（A3）。閉じている間の状態は持ち越さない。
+    if (!open) { setSectionOpen(RISK_SECTION_DEFAULT); setExpanded([]); }
+    setOpen(!open);
+  };
+  const filled = sections.sections.filter((s) => s.rows.length > 0);
+  const allOpen = filled.length > 0 && filled.every((s) => sectionOpen[s.kind] && s.rows.every((r) => isOpen(s.kind, r.run)));
+  const setAll = (v) => {
+    setSectionOpen(Object.fromEntries(RISK_KINDS.map((k) => [k, v])));
+    setExpanded(v ? filled.flatMap((s) => s.rows.map((r) => ({ kind: s.kind, run: r.run }))) : []);
+  };
   const hasRisk = rows.length > 0;
   const MARK_TITLE = "比較元を選んでいるのに同一性が未回答のセルを含みます。判定は安全側（新型車側）で出しています。";
+  const runBtn = { display:"inline-flex", alignItems:"center", gap:6, background:"transparent", border:"none",
+    padding:0, color:"#eef4fa", fontSize:11.5, cursor:"pointer", fontFamily:"inherit", textAlign:"left" };
   return (
     <div style={{ background:PANEL, border:`1px solid ${hasRisk ? `${RED}66` : LINE}`, borderRadius:10, padding:"9px 12px", marginBottom:10 }}>
       <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-        <button onClick={()=>setOpen(!open)}
+        <button onClick={togglePanel}
           style={{ display:"inline-flex", alignItems:"center", gap:6, background:"transparent", border:"none", padding:0,
             color:"#eef4fa", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
           <span style={{ color:MUTE, fontSize:10 }}>{open ? "▼" : "▶"}</span>
@@ -2449,19 +2544,27 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
       </div>
       {open && (
         <div style={{ marginTop:8 }}>
-          {!hasRisk ? (
-            /* 件数の欄がすでに「該当なし」と言っているので、ここでは繰り返さず説明だけを残す */
-            <p style={{ color:MUTE, fontSize:11, margin:"6px 0" }}>
-              表示中の型式ランには、下の3区分に当たるセルがありません。
-            </p>
-          ) : (
-          <>
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-            <button onClick={()=>setExpanded(allOpen ? [] : rows.map((r)=>r.run))} style={{ ...miniBtn, marginTop:0 }}>
-              {allOpen ? "すべてたたむ" : "すべて展開"}
-            </button>
-            <span style={{ fontSize:10, color:MUTE }}>切迫している順（超過が上）に並べています</span>
-          </div>
+          {/* drop未入力のラン（F-27 A7）。区分見出しより上の別枠。区分の件数には数えない（B3）。 */}
+          {sections.alerts.length > 0 && (
+            <div data-risk-alerts="" style={{ border:`1px solid ${RED}66`, borderRadius:8, padding:"6px 10px", marginBottom:8, background:`${RED}0c` }}>
+              <div style={{ fontSize:10.5, fontWeight:800, color:RED, marginBottom:4 }}>{TEXT.risk.drop未入力枠}</div>
+              {sections.alerts.map((a, i) => (
+                <div key={`alert:${i}`} data-risk-alert-run="" style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", fontSize:11.5, color:"#eef4fa", padding:"2px 0" }}>
+                  <RiskRunLabel run={a.run} phase={a.phase} /><DropMissingMark />
+                </div>
+              ))}
+            </div>
+          )}
+          {hasRisk && (
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+              {filled.length > 0 && (
+                <button onClick={()=>setAll(!allOpen)} style={{ ...miniBtn, marginTop:0 }}>
+                  {allOpen ? "すべてたたむ" : "すべて展開"}
+                </button>
+              )}
+              <span style={{ fontSize:10, color:MUTE }}>区分ごとに、切迫している順に並べています</span>
+            </div>
+          )}
           <div style={{ overflowX:"auto" }}>
             <table style={tbl}>
               <thead><tr>
@@ -2469,57 +2572,61 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
                 <th style={th}>規制日</th><th style={th}>期限</th><th style={th}>日数</th>
               </tr></thead>
               <tbody>
-                {rows.map((r, i) => (
-                  <React.Fragment key={`run:${i}`}>
-                    {/* ラン行（A2）。人は「どの車が危ないか」を先に見るので、法規より先に型式ランを出す。 */}
-                    <tr>
-                      <td colSpan={6} style={{ ...td, background:"rgba(90,107,125,0.10)", padding:"7px 8px" }}>
-                        <button onClick={()=>toggle(r.run)}
-                          style={{ display:"inline-flex", alignItems:"center", gap:6, background:"transparent", border:"none",
-                            padding:0, color:"#eef4fa", fontSize:11.5, cursor:"pointer", fontFamily:"inherit", textAlign:"left" }}>
-                          <span style={{ color:MUTE, fontSize:9 }}>{isOpen(r.run) ? "▼" : "▶"}</span>
-                          <span style={{ fontSize:10.5, color:"#8fa3b8" }}>{r.run.gen || "（コード未設定）"}</span>
-                          <span style={{ fontFamily:"ui-monospace,monospace", fontWeight:700 }}>{r.run.typeId || "（型式未設定）"}</span>
-                          <span style={{ fontSize:9.5, padding:"1px 6px", borderRadius:999, color:"#8fa3b8",
-                            border:`1px solid ${LINE}`, background:"rgba(90,107,125,0.12)", fontWeight:700 }}>
-                            {TEXT.phase[r.phase] || ""}</span>
-                          <span style={{ fontSize:9.5, color:MUTE, fontFamily:"ui-monospace,monospace" }}>
-                            LO {fmt(r.run.lo)}・drop {fmt(r.run.drop)}</span>
+                {sections.sections.map((s) => (
+                  <React.Fragment key={`sec:${s.kind}`}>
+                    {/* 区分見出し（A1）。0件でも出す。押すと開閉する（A3）。 */}
+                    <tr data-risk-section={s.kind}>
+                      <td colSpan={6} style={{ ...td, background:`${RISK_COLOR[s.kind]}14`, borderTop:`2px solid ${RISK_COLOR[s.kind]}66`, padding:"6px 8px" }}>
+                        <button onClick={()=>toggleSection(s.kind)}
+                          style={{ ...runBtn, fontWeight:800, color:RISK_COLOR[s.kind] }}>
+                          <span style={{ color:MUTE, fontSize:9 }}>{sectionOpen[s.kind] ? "▼" : "▶"}</span>
+                          {TEXT.risk.区分[s.kind]}
+                          <span style={{ fontSize:10.5 }}>{TEXT.risk.区分件数(s.count)}</span>
                         </button>
-                        {r.alert && <DropMissingMark />}
-                        {r.top && <>
-                          <span style={{ marginLeft:10, fontSize:10.5, color:"#aab8c6" }}>{TEXT.risk.内訳(r.bad, r.due, r.warn)}</span>
-                          <span style={{ marginLeft:10, fontSize:10.5 }}><RiskDays risk={r.top} /></span></>}
-                        {r.unconfirmed && <SamenessUnknownMark title={MARK_TITLE} />}
                       </td>
                     </tr>
-                    {/* 法規行（展開したときだけ）。並びはそのランの中で切迫している順。 */}
-                    {isOpen(r.run) && r.cells.map((m, j) => (
-                      <tr key={`cell:${i}:${j}`}>
-                        <td style={{ ...td, fontSize:11.5, color:"#eef4fa", paddingLeft:26 }}>
-                          {m.reg.id}<div style={{ fontSize:9, color:MUTE }}>{m.reg.label}</div>
-                        </td>
-                        <td style={td}>
-                          <RiskState m={m} />
-                          {m.decision.drop未定 && <DropUndecidedMark />}
-                          {m.decision.根拠未確認 && <SamenessUnknownMark title={MARK_TITLE} />}
-                        </td>
-                        <td style={{ ...td, fontSize:10.5, color:"#aab8c6", whiteSpace:"nowrap" }}>
-                          {m.decision.適用した規制 === "なし" ? <span style={{ color:MUTE }}>—</span> : <Badge kind={m.decision.適用した規制}/>}
-                        </td>
-                        <td style={{ ...td, fontSize:10.5, color:"#aab8c6", fontFamily:"ui-monospace,monospace", whiteSpace:"nowrap" }}>{fmt(m.decision.規制日)}</td>
-                        <td style={{ ...td, fontSize:10.5, color:"#aab8c6", fontFamily:"ui-monospace,monospace", whiteSpace:"nowrap" }}>
-                          {m.decision.期限 === "なし" ? "—" : `${m.decision.期限} ${fmt(m.decision.期限日)}`}
-                        </td>
-                        <td style={{ ...td, fontSize:10.5, whiteSpace:"nowrap" }}><RiskDays risk={m.risk} bold={false} /></td>
-                      </tr>
+                    {sectionOpen[s.kind] && s.rows.map((r, i) => (
+                      <React.Fragment key={`run:${s.kind}:${i}`}>
+                        {/* ラン行（A2）。人は「どの車が危ないか」を先に見るので、法規より先に型式ランを出す。 */}
+                        <tr data-risk-run={s.kind}>
+                          <td colSpan={6} style={{ ...td, background:"rgba(90,107,125,0.10)", padding:"7px 8px 7px 20px" }}>
+                            <button onClick={()=>toggle(s.kind, r.run)} style={runBtn}>
+                              <span style={{ color:MUTE, fontSize:9 }}>{isOpen(s.kind, r.run) ? "▼" : "▶"}</span>
+                              <RiskRunLabel run={r.run} phase={r.phase} />
+                            </button>
+                            <span style={{ marginLeft:10, fontSize:10.5, color:"#aab8c6" }}>{TEXT.risk.区分件数(r.cells.length)}</span>
+                            <span style={{ marginLeft:10, fontSize:10.5 }}><RiskDays risk={r.top || r.cells[0].risk} /></span>
+                            {r.unconfirmed && <SamenessUnknownMark title={MARK_TITLE} />}
+                          </td>
+                        </tr>
+                        {/* 法規行（展開したときだけ）。その区分の法規行だけを、切迫している順に出す。 */}
+                        {isOpen(s.kind, r.run) && r.cells.map((m, j) => (
+                          <tr key={`cell:${s.kind}:${i}:${j}`}>
+                            <td style={{ ...td, fontSize:11.5, color:"#eef4fa", paddingLeft:34 }}>
+                              {m.reg.id}<div style={{ fontSize:9, color:MUTE }}>{m.reg.label}</div>
+                            </td>
+                            <td style={td}>
+                              <RiskState m={m} />
+                              {m.decision.drop未定 && <DropUndecidedMark />}
+                              {m.decision.根拠未確認 && <SamenessUnknownMark title={MARK_TITLE} />}
+                            </td>
+                            <td style={{ ...td, fontSize:10.5, color:"#aab8c6", whiteSpace:"nowrap" }}>
+                              {m.decision.適用した規制 === "なし" ? <span style={{ color:MUTE }}>—</span> : <Badge kind={m.decision.適用した規制}/>}
+                            </td>
+                            <td style={{ ...td, fontSize:10.5, color:"#aab8c6", fontFamily:"ui-monospace,monospace", whiteSpace:"nowrap" }}>{fmt(m.decision.規制日)}</td>
+                            <td style={{ ...td, fontSize:10.5, color:"#aab8c6", fontFamily:"ui-monospace,monospace", whiteSpace:"nowrap" }}>
+                              {m.decision.期限 === "なし" ? "—" : `${m.decision.期限} ${fmt(m.decision.期限日)}`}
+                            </td>
+                            <td style={{ ...td, fontSize:10.5, whiteSpace:"nowrap" }}><RiskDays risk={m.risk} bold={false} /></td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
                     ))}
                   </React.Fragment>
                 ))}
               </tbody>
             </table>
           </div>
-          </>)}
           {/* 凡例。状態名は辞書から引く（ここで文字列を書くと、辞書を直したときに説明だけ古い名前が残る）。
               「要対応」は辞書が日付つきの文言しか持たない（TEXT.compliance.要対応期日／要対応LO）ので、
               その族の呼び名としてかぎ括弧で書いている。 */}
@@ -2528,13 +2635,15 @@ function RiskPanel({ rows, filterActive, shownRuns, totalRuns }) {
             <b style={{ color:RED }}>{TEXT.risk.区分.不適合}</b>（{TEXT.compliance.法規不適合()}：いま生産中・期限を過ぎている・実績なし）、
             <b style={{ color:ORANGE }}>{TEXT.risk.区分.期限前}</b>（「要対応」：要・実績なし・期限はまだ先。まだラインオフしていないランも入ります）、
             <b style={{ color:AMBER }}>{TEXT.risk.区分.予告}</b>（{TEXT.cell.否要再確認}：ドロップ後30日以内にこれから継続規制が来る）。
+            開いた直後は{TEXT.risk.区分.不適合}と{TEXT.risk.区分.予告}を開き、{TEXT.risk.区分.期限前}はたたんでいます（見出しを押すと開閉します）。
+            1つのランが複数の区分に当たるときは、それぞれの区分に出ます。区分の中は切迫している順で、{TEXT.risk.区分.期限前}は同じ期限なら未計画が先です。
             取得予定（○）が付いているセルは期限前・未取得のまま
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><PlannedMark /></span> を付けます（○の有無で行・件数は変わりません）。
             <b>実績あり（認可番号待ちを含む）のセルと、ドロップ済みのランは出しません</b>（ドロップ済みのランの状態は、{TEXT.compliance.過去不適合()}を含めてマトリクスに残ります）。
             dropが空のランは<b>生産が続く前提（drop＝∞）</b>で判定し、出た行に
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><DropUndecidedMark /></span> を付けます（dropが無いので黄色予告には入りません）。
             <b>LOを迎えたのにdropが空</b>のランは入力漏れとして、法規に関係なくラン単位で
-            <b style={{ color:RED }}>{TEXT.risk.drop未入力}</b> を出します（法規の件数には数えません）。
+            <b style={{ color:RED }}>{TEXT.risk.drop未入力}</b> を区分見出しより上の別枠に出します（法規の件数には数えません）。
             LOが空のランは判定不能なので出しません（帳票のセルに出ます）。
             状態・規制日・期限は<b>帳票のセルとまったく同じ判定結果</b>で、ここでは束ねて並べているだけです。
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><SamenessUnknownMark title={MARK_TITLE} /></span>
@@ -2612,10 +2721,12 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
   // 絞れば作業中用、外せば全体の見回しになる。判定・日付比較はここでも一覧側でも行わない。
   // ※ 新しいフックは既存フックより後ろに置く（既存の呼び出し順を動かさないため）。
   const riskRows = useMemo(() => riskRunRows(model, { runs: visibleRuns }), [model, visibleRuns]);
+  // 区分見出し（F-27）。同じ集約結果・同じ表示中の列から作る（件数・フィルター連動が上の riskRows とずれない）。
+  const riskSec = useMemo(() => riskSections(model, { runs: visibleRuns }), [model, visibleRuns]);
 
   // 法規が0件でも、ラン単位の異常（F-24 A4「drop未入力（LO済み）」）は危険一覧に出す（Codexレビュー指摘1）。
   const riskOnly = riskRows.length > 0
-    ? <RiskPanel rows={riskRows} filterActive={filterActive} shownRuns={visibleRuns.length} totalRuns={runs.length} />
+    ? <RiskPanel rows={riskRows} sections={riskSec} filterActive={filterActive} shownRuns={visibleRuns.length} totalRuns={runs.length} />
     : null;
   if (runs.length===0 || regs.length===0) {
     // データが空でも、保持している列フィルターの選択は見せて手動解除できるようにする
@@ -2649,7 +2760,7 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
           total={runs.length} shown={visibleRuns.length}
           active={filterActive} onClearAll={columnFilter.clear} />
       )}
-      <RiskPanel rows={riskRows} filterActive={filterActive} shownRuns={visibleRuns.length} totalRuns={runs.length} />
+      <RiskPanel rows={riskRows} sections={riskSec} filterActive={filterActive} shownRuns={visibleRuns.length} totalRuns={runs.length} />
       {filterActive && visibleRuns.length === 0 ? (
         <div style={{ background:PANEL, border:`1px dashed ${LINE}`, borderRadius:12, padding:"22px 16px", textAlign:"center", color:MUTE, fontSize:12, lineHeight:1.8 }}>
           絞り込み条件に一致する型式ランがありません（<b style={{ color:AMBER }}>0 件</b>）。<br/>

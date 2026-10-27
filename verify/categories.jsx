@@ -11,6 +11,8 @@
 // 完成条件 A1〜A5・B1〜B3（docs/current-task.md の F-26）を、ケースIDの先頭で対応づける。
 // 必須検証の境界（継続車規制日 − drop ＝ 0／1／30／31、drop未定、LO＝今日、drop済み、認可番号待ち、
 // ○の付け外し前後の件数）はすべてここで確かめる。A5（初期ダミー）は verify/seed-demo.html の A2-risk-panel。
+// F-27 で表が「区分見出し → ラン行 → 法規行」になったため、画面の並び・展開の期待値を区分ごとに書き直してある
+// （判定・件数の期待値は変えていない。F-27の境界は verify/sections.html）。
 // 決定表の既存ケースは verify/decision-table.html（期待値は変えていない）。
 //
 // 期待値に固定日付を書かない。実行時の端末ローカル日付から相対日付を作る。
@@ -19,7 +21,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import StandaloneApp from "../standalone/StandaloneApp.jsx";
 import IListApp, {
-  TODAY, parseImportedData, riskRunRows, buildCellModel, evalCellWith, makeSamenessContext, RISK_KINDS,
+  TODAY, parseImportedData, riskRunRows, riskSections, buildCellModel, evalCellWith, makeSamenessContext, RISK_KINDS,
 } from "../src/IListApp.jsx";
 import { makeCertStatusContext } from "../standalone/cert-status.js";
 
@@ -97,17 +99,22 @@ async function expandAll(c) {
   const b = [...panelEl(c).querySelectorAll("button")].find((x) => /すべて展開/.test(x.textContent));
   if (b) { b.click(); await sleep(40); }
 }
+// F-27：表は「区分見出し → ラン行 → 法規行」。区分見出しは飛ばし、ラン行にその区分（section）を持たせる
 function riskGroups(c) {
   const t = riskTable(c);
   if (!t) return [];
   const out = [];
+  let section = null;
   for (const tr of t.querySelectorAll("tbody > tr")) {
-    if (tr.children.length === 1) out.push({ head: tr, regs: [] });
+    if (tr.hasAttribute("data-risk-section")) section = tr.getAttribute("data-risk-section");
+    else if (tr.hasAttribute("data-risk-run")) out.push({ section, head: tr, regs: [] });
     else if (out.length) out[out.length - 1].regs.push(tr);
   }
   return out;
 }
 const groupTypeIds = (c) => riskGroups(c).map((g) => g.head.textContent.match(/TYPE-[A-Z0-9-]+/)?.[0] || "");
+// 1つのランが複数の区分に出るので（F-27 A2）、出てくる順に重複を除いた型式の並び
+const uniqTypeIds = (c) => [...new Set(groupTypeIds(c))];
 const regState = (tr) => tr.children[1].textContent.trim();
 function chip(container, label) {
   const b = [...container.querySelectorAll("button")].find((x) => x.textContent.trim() === label);
@@ -243,7 +250,9 @@ const SCENARIOS = [
       const c = await mountWith(mount, GATE);
       asserts.check("パネルの件数", riskCountText(c), L_COUNT(1, 2));
       await openPanel(c);
-      asserts.check("一覧のラン", groupTypeIds(c), ["TYPE-DROPTODAY"]);
+      // F-27：rT は期限超過と黄色予告の両方の区分に出る
+      asserts.check("一覧のラン（区分ごと）", riskGroups(c).map((g) => [g.section, g.head.textContent.match(/TYPE-[A-Z0-9-]+/)[0]]), [["不適合", "TYPE-DROPTODAY"], ["予告", "TYPE-DROPTODAY"]]);
+      asserts.check("一覧のラン", uniqTypeIds(c), ["TYPE-DROPTODAY"]);
       const matrix = matrixTable(c).textContent;
       asserts.checkTrue("マトリクスには rD の列が残る", matrix.includes("TYPE-DROPPED"));
       asserts.checkTrue("rD の過去に法規不適合はマトリクスに残る", matrix.includes(L_PAST));
@@ -267,7 +276,8 @@ const SCENARIOS = [
       asserts.check("状態欄の区分名", g.map((x) => regState(x.regs[0]).slice(0, x === g[2] ? K_DUE.length : K_OVER.length)), [K_OVER, K_OVER, K_DUE]);
       asserts.checkTrue("期限前の日数の主語", g[2].regs[0].textContent.includes("期限まで 1 日"));
       asserts.checkTrue("LO当日の期限超過は0日", g[1].regs[0].textContent.includes("期限を過ぎて 0 日"));
-      asserts.checkTrue("開発中のラン行の内訳", g[2].head.textContent.includes(L_BREAK(0, 1, 0)));
+      // F-27：ラン行は区分見出しの下に出るので、内訳ではなくその区分の件数を出す
+      asserts.check("開発中のラン行は期限前の区分にあり、その区分の件数", [g[2].section, g[2].head.textContent.includes("1 件"), g[2].head.textContent.includes(L_BREAK(0, 1, 0))], ["期限前", true, false]);
     },
   },
   {
@@ -304,7 +314,7 @@ const SCENARIOS = [
       asserts.check("一覧に出るのは rX だけ", rows.map((r) => [r.run.key, r.due]), [["rX", 1]]);
       const c = await mountWith(mount, CERT);
       asserts.check("パネルの件数", riskCountText(c), L_COUNT(1, 1));
-      await openPanel(c);
+      await openPanel(c); await expandAll(c);   // F-27：期限前・未取得は既定でたたまれている
       asserts.check("一覧のラン", groupTypeIds(c), ["TYPE-OTHER"]);
     },
   },
@@ -324,18 +334,22 @@ const SCENARIOS = [
       const box = () => c.querySelector('input[aria-label="取得予定 rQ g51"]');
       asserts.checkTrue("○のチェックボックスがある", !!box());
       await openPanel(c); await expandAll(c);
+      // F-27 A5：同じ期限なら未計画が先なので、○で行の並びは変わりうる（B4：並びは変わってよい）。行の集合と件数で比べる
       const snap = () => ({ count: riskCountText(c), heads: riskGroups(c).map((g) => g.head.textContent),
-        regs: riskGroups(c).flatMap((g) => g.regs.map((tr) => [tr.children[0].textContent, regState(tr).replace(L_PLANNED, "")])) });
+        regs: riskGroups(c).flatMap((g) => g.regs.map((tr) => [tr.children[0].textContent, regState(tr).replace(L_PLANNED, "")])).sort() });
       const planned = () => riskGroups(c).flatMap((g) => g.regs.map((tr) => regState(tr).includes(L_PLANNED)));
+      const order = () => riskGroups(c).flatMap((g) => g.regs.map((tr) => tr.children[0].textContent.match(/REG-[A-Z]+/)[0]));
       const before = snap();
       asserts.check("○なし：件数", before.count, L_COUNT(1, 2));
       asserts.check("○なし：計画済みの印は無い", planned(), [false, false]);
       await setChecked(box(), true);
       asserts.check("○あり：行・件数は同じ", snap(), before);
-      asserts.check("○あり：○を付けた法規行だけに計画済み", planned(), [true, false]);
+      asserts.check("○あり：計画済みの REG-PLAN は同じ期限の未計画の後ろ", order(), ["REG-NOPLAN", "REG-PLAN"]);
+      asserts.check("○あり：○を付けた法規行だけに計画済み", planned(), [false, true]);
       await setChecked(box(), false);
       asserts.check("○を外す：行・件数は同じ", snap(), before);
       asserts.check("○を外す：計画済みの印が消える", planned(), [false, false]);
+      asserts.check("○を外す：元の並びに戻る", order(), ["REG-PLAN", "REG-NOPLAN"]);
     },
   },
   {
@@ -344,7 +358,7 @@ const SCENARIOS = [
     expect: "PJ-Aで絞るとTYPE-FA1だけ（TYPE-FA2は実績あり）。型式TYPE-FB1で絞るとそれだけ。PJ-A×TYPE-FB1は該当なし。解除で全体に戻る",
     async run({ mount, asserts }) {
       const c = await mountWith(mount, FILTER);
-      await openPanel(c);
+      await openPanel(c); await expandAll(c);   // F-27：期限前・未取得は既定でたたまれている
       asserts.check("初期", [groupTypeIds(c), riskCountText(c)], [["TYPE-FA1", "TYPE-FB1"], L_COUNT(2, 2)]);
       await toggleChip(c, "PJ-A");
       asserts.check("プロジェクトで絞る", [groupTypeIds(c), riskCountText(c)], [["TYPE-FA1"], L_COUNT(1, 1)]);
@@ -376,7 +390,10 @@ const SCENARIOS = [
         await sleep(150);
         asserts.check("件数", riskCountText(c), L_COUNT(want.length, want.reduce((n, r) => n + r.cells.length, 0)));
         await openPanel(c); await expandAll(c);
-        asserts.check("ラン行", groupTypeIds(c), want.map((r) => r.run.typeId));
+        // F-27：画面は区分ごと。区分ごとのランの並びはモデル（riskSections）と同じで、型式の集合は riskRunRows と同じ
+        asserts.check("ラン行（区分ごと）", riskGroups(c).map((g) => [g.section, g.head.textContent.match(/TYPE-[A-Z0-9-]+/)[0]]),
+          riskSections(model, { runs }).sections.flatMap((s) => s.rows.map((r) => [s.kind, r.run.typeId])));
+        asserts.check("ラン行の型式の集合", uniqTypeIds(c).sort(), want.filter((r) => r.cells.length > 0).map((r) => r.run.typeId).sort());
         const text = riskTable(c).textContent;
         asserts.checkTrue("3区分が出ている", [K_OVER, K_DUE, K_YELLOW].every((k) => text.includes(k)));
         asserts.check("TYPE-DROPPED は出ない", text.includes("TYPE-DROPPED"), false);
