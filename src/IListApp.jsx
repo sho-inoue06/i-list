@@ -64,6 +64,8 @@ export const TEXT = {
     // F-28 A1。人の適用判断が「対象外」のセルに付ける印。判定・色・区分は変えない（B1）。
     対象外印:   "対象外",
     対象外要再確認印: "対象外・要再確認",
+    // 人が対象外と判断したセルの状態に添える前置き。状態名・色は決定表の結果のまま（B1）で、機械の判定であることだけを示す。
+    自動判定前置き: "自動判定：",
     // F-28 A4。LO未入力で判定できない型式ランの数（表示中のランだけ。0件も出す）。
     判定不能件数: (k) => `判定不能 ラン ${k} 件`,
     // F-27 A7。drop未入力のランを、区分見出しより上にまとめて出す別枠の見出し。
@@ -2509,17 +2511,20 @@ function ExemptMark({ mark }) {
 }
 
 // 状態。帳票のセルと同じ状態名を出す（A7：マトリクスの状態と一覧の状態が一致する）。
-//   不適合・期限前の行 … F-14の4状態。人の対象外では灰に上書きせず、決定表の結果のまま出す（F-28 B1。印は ExemptMark）
+//   不適合・期限前の行 … F-14の4状態。人の対象外では灰に上書きせず、決定表の結果のまま出す（F-28 B1。印は ExemptMark）。
+//                        その場合は状態名の前に「自動判定：」を添え、人の判断ではないことを示す（色は変えない）
 //   予告の行           … 帳票セルと同じ「否・要再確認」
 function RiskState({ m }) {
+  const autoPrefix = (color) => m.exemptMark
+    ? <span data-risk-auto-prefix style={{ fontSize:11, fontWeight:700, color }}>{TEXT.risk.自動判定前置き}</span> : null;
   if (m.risk.kind === "予告")
     return <><RiskKind kind="予告" /><span style={{ fontSize:11, fontWeight:700, color:AMBER }}>{TEXT.cell.否要再確認}</span></>;
   if (m.risk.kind === "期限前")
-    return <><RiskKind kind="期限前" />{m.riskCompliance
+    return <><RiskKind kind="期限前" />{autoPrefix(m.riskCompliance ? m.riskCompliance.color : ORANGE)}{m.riskCompliance
       ? <ComplianceLabel s={m.riskCompliance} fontSize={11} />
       : <span style={{ fontSize:11, fontWeight:700, color:ORANGE }}>{TEXT.risk.区分.期限前}</span>}
       {m.decision.車両申請 === "発生する（計画済み）" && <PlannedMark />}</>;
-  return <><RiskKind kind="不適合" />{m.riskCompliance
+  return <><RiskKind kind="不適合" />{autoPrefix(m.riskCompliance ? m.riskCompliance.color : RED)}{m.riskCompliance
     ? <ComplianceLabel s={m.riskCompliance} fontSize={11} />
     : <span style={{ fontSize:11, fontWeight:800, color:RED }}>{TEXT.compliance.法規不適合()}</span>}</>;
 }
@@ -2733,7 +2738,7 @@ function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
             <b style={{ color:RED }}>{TEXT.risk.drop未入力}</b> を区分見出しより上の別枠に出します（法規の件数には数えません）。
             LOが空のランは判定不能なので3区分には出さず、上に<b style={{ color:UNDECIDABLE }}>判定不能</b>のラン数だけを出します（セルは帳票に出ます）。
             状態・規制日・期限は<b>帳票のセルとまったく同じ判定結果</b>で、ここでは束ねて並べているだけです。
-            人が対象外と判断したセルも消さず、状態は判定結果のまま
+            人が対象外と判断したセルも消さず、状態は判定結果のまま「自動判定：」を前に添えて出し、
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><ExemptMark mark="対象外" /></span> を付けて区分の末尾にまとめます
             （同じランの対象外でない行は上に残るので、そのランは区分に2回出ることがあります）
             （見出しの「うち対象外」はこの数）。要再確認が掛かっているものは

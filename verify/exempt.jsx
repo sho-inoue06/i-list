@@ -56,6 +56,7 @@ const L_UNDECIDABLE = (k) => `判定不能 ラン ${k} 件`;
 const M_EXEMPT = "対象外", M_RECHECK = "対象外・要再確認";
 const L_EXEMPT_GRAY = "対象外（判断済み）";   // 帳票の灰の上書き表示。一覧には出さない（B1）
 const L_VIOLATION = "法規不適合";
+const L_AUTO_PREFIX = "自動判定：";   // 対象外の行の状態に添える前置き（色・状態名は変えない）
 
 // ── ダミーデータ（架空。実車・実法規・実認可番号とは無関係） ──
 // すべて継続ラン（要 ⇔ 継続車規制日 ≤ drop）。
@@ -266,7 +267,7 @@ const SCENARIOS = [
   {
     id: "B1-color-unchanged",
     name: "B1：人の判断・要再確認で、自動判定・色・区分の所属が変わらない（赤を薄くしない）",
-    expect: "判断あり／なしで、全セルの決定表の出力・区分・件数 n が同じ。一覧の状態は「法規不適合」の赤のままで、灰の「対象外（判断済み）」にしない。行の不透明度は1",
+    expect: "判断あり／なしで、全セルの決定表の出力・区分・件数 n が同じ。一覧の状態は「法規不適合」の赤のままで、灰の「対象外（判断済み）」にしない。対象外の行だけ「自動判定：」を同じ色で前に添える。行の不透明度は1",
     async run({ mount, asserts }) {
       const a = modelOf(MAIN), b = modelOf(NO_DECISIONS);
       const sig = (m) => m.model.list.map((x) => [x.run.key, x.reg.rid, JSON.stringify(x.decision), x.risk?.kind ?? null, x.auto.status]);
@@ -288,6 +289,12 @@ const SCENARIOS = [
       asserts.check("対象外・要再確認の行も状態は法規不適合（同じ色）", [stateColor(exempt), stateColor(recheck)], [stateColor(plain), stateColor(plain)]);
       asserts.checkTrue("状態の色は赤（判断なしの行と同じ・灰でない）", stateColor(plain) && stateColor(plain) !== "rgb(154, 171, 189)");
       asserts.check("一覧に灰の上書き表示は出ない", riskTable(c).textContent.includes(L_EXEMPT_GRAY), false);
+      const prefixOf = (tr) => tr.querySelector("[data-risk-auto-prefix]");
+      asserts.check("対象外の行だけ状態に「自動判定：」を添える（判断なしの行には付けない）",
+        [plain, exempt, recheck].map((tr) => prefixOf(tr)?.textContent ?? null), [null, L_AUTO_PREFIX, L_AUTO_PREFIX]);
+      asserts.check("「自動判定：」は状態と同じ赤", [exempt, recheck].map((tr) => getComputedStyle(prefixOf(tr)).color), [stateColor(plain), stateColor(plain)]);
+      asserts.check("期限超過・期限前では印のある行とだけ一致し、黄色予告には付けない",
+        view(c).flatMap((s) => s.runs.flatMap((r) => r.regs.map((tr) => !!prefixOf(tr) === (!!tr.querySelector("[data-risk-exempt]") && s.kind !== "予告")))).every(Boolean), true);
       const op = (el) => [el, ...el.querySelectorAll("*")].map((x) => getComputedStyle(x).opacity);
       asserts.check("対象外の行は薄くならない", [exempt, recheck].every((tr) => op(tr).every((x) => x === "1")), true);
       asserts.check("区分見出しの色は判断の有無で同じ（期限超過）",
