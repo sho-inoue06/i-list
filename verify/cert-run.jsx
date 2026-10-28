@@ -605,6 +605,8 @@ const SCENARIOS = [
         "DEMO-0003": { "DEMO-REG-A": "DEMO*A00/00*03", "DEMO-REG-A2": "DEMO*A02/00*01", "DEMO-REG-B": "DEMO*B00/00*02", "DEMO-REG-D": "DEMO*D00/00*03" },
         "DEMO-0004": { "DEMO-REG-A": "DEMO*A00/00*04", "DEMO-REG-A2": "DEMO*A02/00*02", "DEMO-REG-D": "DEMO*D00/00*04" },
         "DEMO-0005": { "DEMO-REG-A": "DEMO*A00/00*05", "DEMO-REG-B": "DEMO*B00/00*03", "DEMO-REG-C": "DEMO*C00/00*01", "DEMO-REG-D": "DEMO*D00/00*05" },
+        // F-28でSEEDに足した型式（r11）。SEEDのコメントの表と同じ番号
+        "DEMO-0006": { "DEMO-REG-A": "DEMO*A00/00*06", "DEMO-REG-A2": "DEMO*A02/00*03", "DEMO-REG-C": "DEMO*C00/00*02" },
       };
       // F-25でSEEDにLO空のラン（r9）が入った。旧い入口はF-24（LO空＝判定不能）より前の写しなので、
       // LOのあるランだけで突き合わせる（比べたいのは番号の持ち方の違いで、F-24の判定ではない）。

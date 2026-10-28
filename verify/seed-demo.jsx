@@ -70,8 +70,9 @@ const isRealDate = (s) => {
 // 状態の呼び名は decideCell（F-19の決定表）の出力名に合わせてある。
 // ───────────────────────────────────────────────
 const STATE_MAP = {
-  現在法規不適合: ["r6×DEMO-REG-C"],
-  黄色予告: ["r6×DEMO-REG-E"],
+  // F-28：r11（DEMO-0006）を足した。REG-B・D が期限超過、REG-E が黄色予告（人の対象外の例を置く先）
+  現在法規不適合: ["r11×DEMO-REG-B", "r11×DEMO-REG-D", "r6×DEMO-REG-C"],
+  黄色予告: ["r11×DEMO-REG-E", "r6×DEMO-REG-E"],
   法規適合必要: [
     "r10×DEMO-REG-B", "r10×DEMO-REG-C", "r10×DEMO-REG-E",
     "r4×DEMO-REG-A2", "r4×DEMO-REG-C", "r4×DEMO-REG-E",
@@ -81,6 +82,7 @@ const STATE_MAP = {
   過去に法規不適合: ["r3×DEMO-REG-B"],
   実績あり: [
     "r10×DEMO-REG-A", "r10×DEMO-REG-A2", "r10×DEMO-REG-D",
+    "r11×DEMO-REG-A", "r11×DEMO-REG-A2", "r11×DEMO-REG-C",
     "r1×DEMO-REG-A", "r2×DEMO-REG-A", "r2×DEMO-REG-D", "r3×DEMO-REG-A", "r3×DEMO-REG-D",
     "r4×DEMO-REG-A", "r4×DEMO-REG-B", "r4×DEMO-REG-D", "r5×DEMO-REG-A", "r5×DEMO-REG-D",
     "r6×DEMO-REG-A", "r6×DEMO-REG-A2", "r6×DEMO-REG-B", "r6×DEMO-REG-D",
@@ -112,6 +114,7 @@ const SEED_OFFSETS = {
     r5: [60, 1900], r6: [-190, 150], r7: [120, 1550], r8: [-200, 120],
     // null＝空のまま（F-25：LO空のラン・drop未定のラン）
     r9: [null, null], r10: [500, null],
+    r11: [-100, 150],   // F-28
   },
   regs: {
     g1: [-3400, -2800], g2: [-700, 200], g3: [-2000, -1200],
@@ -119,7 +122,7 @@ const SEED_OFFSETS = {
   },
 };
 // r9 はLOが空なので「生産中」（productionPhaseOf の読み方。判定は判定不能になる）
-const EXPECTED_PHASES = ["drop済み", "drop済み", "drop済み", "生産中", "開発中", "生産中", "開発中", "生産中", "生産中", "開発中"];
+const EXPECTED_PHASES = ["drop済み", "drop済み", "drop済み", "生産中", "開発中", "生産中", "開発中", "生産中", "生産中", "開発中", "生産中"];
 
 // 写しの認証実績を「型式 × 法規ID」の単位でまとめて書き換える（対照実験用）。
 // F-22 で認証実績は型式ラン×法規行になったので、その型式の全ランの該当法規行へ同じ変更をかける
@@ -180,6 +183,10 @@ function offsetMismatches(today) {
   for (const b of [...s.bases, ...s.sameness]) {
     if (b.decidedAt && b.decidedAt.slice(0, 10) !== shift(-3, today))
       out.push(`${today} decidedAt=${b.decidedAt}（期待 ${shift(-3, today)}）`);
+  }
+  // 人の適用判断（F-28）の確定日時も相対
+  for (const x of s.decisions) {
+    if (x.decidedAt.slice(0, 10) !== shift(-2, today)) out.push(`${today} decision.decidedAt=${x.decidedAt}（期待 ${shift(-2, today)}）`);
   }
   return out;
 }
@@ -311,12 +318,13 @@ const NOT_STATE_KEYS = {
 };
 const INPUT_AXIS = "入力状態（dropInputStateOf）";
 
-// 単体版の初期表示と同じ入口で、初期データの全セルを評価する（StandaloneApp と同じく decisions は空）。
+// 単体版の初期表示と同じ入口で、初期データの全セルを評価する（F-28：StandaloneApp と同じく SEED の人の判断を使う）。
 function standaloneCells(data, today = TODAY) {
   const { runs, regs, cert, bases, sameness } = data;
+  const decisions = data.decisions || [];
   const sameCtx = makeSamenessContext(runs, bases, sameness);
-  const ctx = makeCertStatusContext(runs, cert, [], sameCtx, today);
-  return buildCellModel({ runs, regs, evalCell: ctx.evaluate, decisions: [], sameCtx, today }).list;
+  const ctx = makeCertStatusContext(runs, cert, decisions, sameCtx, today);
+  return buildCellModel({ runs, regs, evalCell: ctx.evaluate, decisions, sameCtx, today }).list;
 }
 // 状態の定義を列挙する。outputs は decideCell の出力の見本（初期データの全セル＋通常入力の1回）。
 function stateDefinitions(outputs, axes = VALUE_AXES, inputStates = DROP_INPUT_STATES) {
@@ -350,16 +358,16 @@ const SCENARIOS = [
     async run({ asserts }) {
       const { map } = stateMapOf(SEED);
       asserts.check("対応表との差分", diffStateMap(map), []);
-      asserts.check("全セル数（10ラン×6法規）", Object.values(map).reduce((n, a) => n + a.length, 0), 60);
+      asserts.check("全セル数（11ラン×6法規）", Object.values(map).reduce((n, a) => n + a.length, 0), 66);
     },
   },
   {
     id: "A1-six-states-present",
     name: "7つの業務状態が、JSON読込なしの初期表示に少なくとも1セルずつある",
-    expect: "現在法規不適合1・黄色予告1・法規適合必要13・過去に法規不適合1・実績あり24・否14・判定不能6。どれも0件でない",
+    expect: "現在法規不適合3・黄色予告2・法規適合必要13・過去に法規不適合1・実績あり27・否14・判定不能6。どれも0件でない",
     async run({ asserts }) {
       const { map, model, runs } = stateMapOf(SEED);
-      asserts.check("状態ごとの件数", STATE_NAMES.map((k) => map[k].length), [1, 1, 13, 1, 24, 14, 6]);
+      asserts.check("状態ごとの件数", STATE_NAMES.map((k) => map[k].length), [3, 2, 13, 1, 27, 14, 6]);
       asserts.checkTrue("7状態すべてが1件以上", STATE_NAMES.every((k) => map[k].length > 0));
       asserts.check("生産フェーズ（開発中・生産中・drop済みが全部ある）", runs.map((r) => model.phaseOf(r)), EXPECTED_PHASES);
       asserts.check("フェーズの種類", [...new Set(runs.map((r) => model.phaseOf(r)))].sort(), ["drop済み", "生産中", "開発中"]);
@@ -368,30 +376,34 @@ const SCENARIOS = [
   {
     id: "A2-risk-panel",
     name: "危険一覧のパネルが、JSON読込なしで件数を出し、開くと drop前のランの3区分が見える（F-26）",
-    expect: "閉じたパネルに「5 ラン・13 件」。期限超過に DEMO-0003、期限前・未取得に4ラン、黄色予告に DEMO-0003（F-27の区分見出しごと）。認可番号待ち・過去に法規不適合・drop済みランは出ない。○ありは計画済み",
+    expect: "閉じたパネルに「6 ラン・16 件」。期限超過に DEMO-0003・DEMO-0006、期限前・未取得に4ラン、黄色予告に DEMO-0006・DEMO-0003（F-27の区分見出しごと。F-28の対象外の寄せを含む）。認可番号待ち・過去に法規不適合・drop済みランは出ない。○ありは計画済み",
     async run({ mount, asserts }) {
       const c = mount(undefined).container;
       await sleep(80);
       // 単体版は前例（F-23）を使うので、認可番号待ちの r5×REG-B・r7×REG-B は実績ありとして渡り、出ない（B1）
-      asserts.check("閉じたパネルの件数", riskCountText(c), "5 ラン・13 件");
+      asserts.check("閉じたパネルの件数", riskCountText(c), "6 ラン・16 件");
       asserts.checkTrue("『該当なし』ではない", !c.textContent.includes("危険な型式ランはありません。"));
       await openPanel(c);
       await clickInPanel(c, /すべて展開/);
       const groups = riskGroups(c);
       // F-27：区分ごとにラン行が出る。DEMO-0003 は期限超過と黄色予告の両方に出る
-      asserts.check("一覧に出るラン（区分ごと）", groups.map((g) => [g.section, g.head.textContent.match(/DEMO-\d{4}/)?.[0]]),
-        [["不適合", "DEMO-0003"], ["期限前", "DEMO-0001"], ["期限前", "DEMO-0002"], ["期限前", "DEMO-0004"], ["期限前", "DEMO-0004"], ["予告", "DEMO-0003"]]);
+      // F-28：印が「対象外」の行は区分の末尾の段へ寄せる（同じランが上の段にも出る）。
+      //       期限超過は r11（DEMO-0006）の REG-B、期限前は r4（DEMO-0001）の REG-C、黄色予告は r6（DEMO-0003）の REG-E が末尾の段
+      asserts.check("一覧に出るラン（区分ごと）", groups.map((g) => [g.section, g.head.textContent.match(/DEMO-\d{4}/)?.[0], g.head.hasAttribute("data-risk-aside")]),
+        [["不適合", "DEMO-0003", false], ["不適合", "DEMO-0006", false], ["不適合", "DEMO-0006", true],
+         ["期限前", "DEMO-0002", false], ["期限前", "DEMO-0004", false], ["期限前", "DEMO-0001", false], ["期限前", "DEMO-0004", false], ["期限前", "DEMO-0001", true],
+         ["予告", "DEMO-0006", false], ["予告", "DEMO-0003", true]]);
       asserts.check("先頭のラン行はその区分の件数", groups[0].head.textContent.includes("1 件"), true);
       const regIds = (g) => g.regs.map((tr) => tr.children[0].textContent.match(/DEMO-REG-[A-Z0-9]+/)?.[0]);
-      asserts.check("DEMO-0003 の法規行（期限超過／黄色予告）", [regIds(groups[0]), regIds(groups[5])], [["DEMO-REG-C"], ["DEMO-REG-E"]]);
+      asserts.check("DEMO-0003 の法規行（期限超過／黄色予告）", [regIds(groups[0]), regIds(groups[9])], [["DEMO-REG-C"], ["DEMO-REG-E"]]);
       asserts.checkTrue("不適合が見える（期限を過ぎてn日）", /期限を過ぎて \d+ 日/.test(groups[0].regs[0].textContent));
-      asserts.checkTrue("予告が見える（継続車規制日まで n 日）", /継続車規制日まで \d+ 日（dropの \d+ 日後）/.test(groups[5].regs[0].textContent));
+      asserts.checkTrue("予告が見える（継続車規制日まで n 日）", /継続車規制日まで \d+ 日（dropの \d+ 日後）/.test(groups[9].regs[0].textContent));
       // 一覧に並ぶランはすべて drop前（生産中・開発中）であること。**これがF-20の差し戻しで加わった条件**
       const { model, runs } = stateMapOf(SEED);
       const rows = riskRunRows(model, { runs });
       // ここは API版と同じ入口（前例なし）なので、r5×REG-B も期限前に入る（＝対応表の法規適合必要と同じ集合）
       asserts.check("一覧のラン（キーと生産フェーズ）", rows.map((r) => [r.run.key, r.phase]),
-        [["r6", "生産中"], ["r4", "生産中"], ["r5", "開発中"], ["r7", "開発中"], ["r10", "開発中"]]);
+        [["r6", "生産中"], ["r11", "生産中"], ["r4", "生産中"], ["r5", "開発中"], ["r7", "開発中"], ["r10", "開発中"]]);
       asserts.check("一覧のセル＝対応表から導いた集合", rows.flatMap((r) => r.cells.map((m) => `${m.run.key}×${m.reg.id}`)).sort(), RISK_CELLS);
       asserts.check("drop済みのランは1つも並ばない", rows.filter((r) => r.phase === "drop済み").length, 0);
       asserts.checkTrue("drop済みのランは元データには居る（消したのではなく一覧に出ないだけ）",
@@ -399,13 +411,13 @@ const SCENARIOS = [
       // 出さないもの・出るもの（F-26）
       const panelText = panelEl(c).textContent;
       const regsOf = (i) => groups[i].regs.map((tr) => tr.children[0].textContent.match(/DEMO-REG-[A-Z0-9]+/)?.[0]);
-      asserts.check("法規適合必要（r7・開発中）は期限前で出る。認可番号待ちの REG-B は出ない", regsOf(3), ["DEMO-REG-C", "DEMO-REG-E"]);
-      asserts.check("認可番号待ちの r5×REG-B も出ない", regsOf(2).includes("DEMO-REG-B"), false);
-      const r7E = groups[3].regs[1];
+      asserts.check("法規適合必要（r7・開発中）は期限前で出る。認可番号待ちの REG-B は出ない", regsOf(4), ["DEMO-REG-C", "DEMO-REG-E"]);
+      asserts.check("認可番号待ちの r5×REG-B も出ない", regsOf(3).includes("DEMO-REG-B"), false);
+      const r7E = groups[4].regs[1];
       asserts.checkTrue("○ありの r7×REG-E は期限前・未取得で計画済みの印", /期限前・未取得/.test(r7E.textContent) && r7E.textContent.includes("計画済み"));
-      asserts.check("○なしのセルに計画済みは付かない", groups[3].regs[0].textContent.includes("計画済み"), false);
+      asserts.check("○なしのセルに計画済みは付かない", groups[4].regs[0].textContent.includes("計画済み"), false);
       asserts.checkTrue("drop未定の r10 は drop未定の印つきで期限前（黄色予告に入らない）",
-        groups[4].regs.every((tr) => tr.textContent.includes("drop未定") && tr.textContent.includes("期限前・未取得")));
+        groups[6].regs.every((tr) => tr.textContent.includes("drop未定") && tr.textContent.includes("期限前・未取得")));
       asserts.check("drop済みの 000A は一覧に出ない", panelText.includes("000A"), false);
       asserts.check("過去に法規不適合（r3×REG-B）の 000B は一覧に出ない", panelText.includes("000B"), false);
       // 帳票側には残っている
@@ -441,7 +453,7 @@ const SCENARIOS = [
   {
     id: "A3-time-travel",
     name: "日が進んでも対応表が変わらない（主要状態が消えない）",
-    expect: "翌日・1か月後・1年後・4年後・27年後に開いても、状態の対応表と危険一覧（5ラン・15件・drop前だけ）が今日と同じになる",
+    expect: "翌日・1か月後・1年後・4年後・27年後に開いても、状態の対応表と危険一覧（6ラン・18件・drop前だけ）が今日と同じになる",
     async run({ asserts }) {
       const base = stateMapOf(SEED).map;
       const days = [1, 2, 7, 29, 30, 31, 40, 151, 166, 200, 365, 366, 1000, 1461, 10000];
@@ -452,7 +464,7 @@ const SCENARIOS = [
         if (diffStateMap(map, base).length) broken.push(`${n}日後: ${diffStateMap(map, base).join(" / ")}`);
         const rows = riskRunRows(model, { runs });
         const cells = rows.flatMap((r) => r.cells.map((m) => `${m.run.key}×${m.reg.id}`)).sort();
-        if (rows.length !== 5 || JSON.stringify(cells) !== JSON.stringify(RISK_CELLS))
+        if (rows.length !== 6 || JSON.stringify(cells) !== JSON.stringify(RISK_CELLS))
           broken.push(`${n}日後の一覧: ${rows.length}ラン・${cells.length}件`);
         if (rows.some((r) => r.phase === "drop済み")) broken.push(`${n}日後の一覧にdrop済みのランが出た`);
       }
@@ -533,7 +545,7 @@ const SCENARIOS = [
       asserts.check("DEMO-0001×REG-A はランごとに1件ずつ・同じ番号", onA.map((c) => [c.runKey, c.ck]),
         [["r1", "DEMO*A00/00*01"], ["r2", "DEMO*A00/00*01"], ["r4", "DEMO*A00/00*01"]]);
       asserts.checkTrue("同じ型式のランは全部同じ番号の組を持つ（ダミーの作り方）",
-        ["DEMO-0001", "DEMO-0002", "DEMO-0003", "DEMO-0004", "DEMO-0005"].every((t) => {
+        ["DEMO-0001", "DEMO-0002", "DEMO-0003", "DEMO-0004", "DEMO-0005", "DEMO-0006"].every((t) => {
           // 番号のある件だけを比べる（F-25の取得予定の例は番号が空で、r7だけが持つ）
           const sig = (k) => JSON.stringify(SEED.cert.filter((c) => c.runKey === k && c.ck !== "").map((c) => [c.rid, c.ck]));
           const ks = runs.filter((r) => r.typeId === t).map((r) => r.key);
@@ -615,9 +627,9 @@ const SCENARIOS = [
   {
     id: "A10-dummy-only",
     name: "すべて架空のプロジェクト・型式・法規・認可番号だけを使っている",
-    expect: "型式はDEMO-0001〜0005、法規IDはDEMO-REG-*、認可番号はDEMO*で始まる（取得予定だけの件は番号が空）。会社名・実型式・個人情報は含まない",
+    expect: "型式はDEMO-0001〜0006、法規IDはDEMO-REG-*、認可番号はDEMO*で始まる（取得予定だけの件は番号が空）。会社名・実型式・個人情報は含まない",
     async run({ asserts }) {
-      asserts.check("型式記号", [...new Set(SEED.runs.map((r) => r.typeId))].sort(), ["DEMO-0001", "DEMO-0002", "DEMO-0003", "DEMO-0004", "DEMO-0005"]);
+      asserts.check("型式記号", [...new Set(SEED.runs.map((r) => r.typeId))].sort(), ["DEMO-0001", "DEMO-0002", "DEMO-0003", "DEMO-0004", "DEMO-0005", "DEMO-0006"]);
       asserts.check("プロジェクトコード", [...new Set(SEED.runs.map((r) => r.gen))].sort(), ["000A", "000B", "000C", "001A", "001B"]);
       asserts.checkTrue("法規IDはすべて DEMO-REG- で始まる", SEED.regs.every((r) => /^DEMO-REG-[A-Z0-9]+$/.test(r.id)));
       asserts.checkTrue("法規名はすべて『ダミー法規』", SEED.regs.every((r) => r.label.startsWith("ダミー法規")));
@@ -625,23 +637,24 @@ const SCENARIOS = [
       asserts.checkTrue("認可番号はすべて DEMO* 形式", cks.every((v) => /^DEMO\*[A-Z0-9]+\/\d+\*\d+$/.test(v)));
       asserts.check("番号が空の件は取得予定だけ", SEED.cert.filter((c) => c.ck === "").every((c) => c.planned === true), true);
       asserts.checkTrue("同一性の理由はすべて『ダミー：』", SEED.sameness.every((s) => s.reason.startsWith("ダミー：")));
+      asserts.checkTrue("人の判断の理由はすべて『ダミー：』（F-28）", SEED.decisions.every((x) => x.reason.startsWith("ダミー：")));
       asserts.check("メールアドレス・電話番号らしき文字列", /[\w.]+@[\w.]+|\d{2,4}-\d{2,4}-\d{4}/.test(JSON.stringify(SEED)), false);
     },
   },
   {
     id: "F25-run-mix",
-    name: "型式ランは計10本（drop済み3・LO空1・現在LO〜将来LO 6、drop未定を含む）。既存のキーは振り直さない",
-    expect: "キーは r1〜r10。drop済み＝r1・r2・r3、LO空＝r9、残り6本は生産中か開発中で、そのうち r10 がdrop未定",
+    name: "型式ランは計11本（drop済み3・LO空1・現在LO〜将来LO 7、drop未定を含む）。既存のキーは振り直さない",
+    expect: "キーは r1〜r11（r11 は F-28 で追加）。drop済み＝r1・r2・r3、LO空＝r9、残り7本は生産中か開発中で、そのうち r10 がdrop未定",
     async run({ asserts }) {
       const runs = SEED.runs;
       const phase = (r) => decideCell({ lo: r.lo, drop: r.drop }).生産フェーズ;
       const input = (r) => dropInputStateOf(r.lo, r.drop);
-      asserts.check("キー", runs.map((r) => r.key), ["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10"]);
+      asserts.check("キー", runs.map((r) => r.key), ["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11"]);
       asserts.check("drop済み", runs.filter((r) => input(r) !== "LO未入力" && phase(r) === "drop済み").map((r) => r.key), ["r1", "r2", "r3"]);
       asserts.check("LO空", runs.filter((r) => input(r) === "LO未入力").map((r) => r.key), ["r9"]);
       const rest = runs.filter((r) => input(r) !== "LO未入力" && phase(r) !== "drop済み");
       asserts.check("現在LO〜将来LO（生産中・開発中）", rest.map((r) => [r.key, phase(r)]),
-        [["r4", "生産中"], ["r5", "開発中"], ["r6", "生産中"], ["r7", "開発中"], ["r8", "生産中"], ["r10", "開発中"]]);
+        [["r4", "生産中"], ["r5", "開発中"], ["r6", "生産中"], ["r7", "開発中"], ["r8", "生産中"], ["r10", "開発中"], ["r11", "生産中"]]);
       asserts.check("そのうちdrop未定", rest.filter((r) => input(r) === "drop未定").map((r) => r.key), ["r10"]);
       asserts.check("比較元 r5→r4 を保っている", SEED.bases.find((b) => b.runKey === "r5")?.baseRunKey, "r4");
     },

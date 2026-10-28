@@ -60,8 +60,8 @@ export default function StandaloneApp({ bootData } = {}) {
   const [runs, _setRuns] = useState(bootOk ? bootData.data.runs : SEED.runs);
   const [regs, _setRegs] = useState(bootOk ? bootData.data.regs : SEED.regs);
   const [cert, _setCert] = useState(bootOk ? bootData.data.cert : SEED.cert);
-  // 人の適用判断。SEEDには含めない（初期表示は全件未確認＝レコードなし）。
-  const [decisions, _setDecisions] = useState(bootOk ? bootData.data.decisions : []);
+  // 人の適用判断。初期表示は SEED の例（F-28：危険一覧の対象外の印を現物で見るため）。それ以外のセルは未確認＝レコードなし。
+  const [decisions, _setDecisions] = useState(bootOk ? bootData.data.decisions : SEED.decisions);
   const [tab, setTab] = useState("帳票");
   const [state, setState] = useState(bootOk ? "htmlImported" : "clean");
   const fileRef = useRef(null);

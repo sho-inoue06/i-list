@@ -643,7 +643,7 @@ const SCENARIOS = [
       asserts.check("SEEDはそのまま読込検証を通る", p.ok, true);
       asserts.check("掃き出しで変わらない", sweepSameness(SEED.sameness, SEED.runs, SEED.regs, SEED.bases) === SEED.sameness, true);
       asserts.check("プロジェクトコード", [...new Set(SEED.runs.map((r) => r.gen))], ["000A", "000B", "000C", "001A", "001B"]);
-      asserts.check("型式追加のあるプロジェクト（複数型式）", ["000B", "000C", "001A", "001B"].map((g) => new Set(SEED.runs.filter((r) => r.gen === g).map((r) => r.typeId)).size), [2, 3, 2, 2]);
+      asserts.check("型式追加のあるプロジェクト（複数型式）", ["000B", "000C", "001A", "001B"].map((g) => new Set(SEED.runs.filter((r) => r.gen === g).map((r) => r.typeId)).size), [2, 3, 3, 2]);   // F-28：001A に DEMO-0006（r11）を足した
       const c = mount(undefined).container;
       await sleep(80);
       asserts.checkTrue("開いた直後は変更なし", c.textContent.includes("変更なし（未書き出しの変更はありません）"));
