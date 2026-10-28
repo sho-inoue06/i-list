@@ -59,6 +59,13 @@ export const TEXT = {
     区分: { 不適合: "期限超過", 期限前: "期限前・未取得", 予告: "黄色予告" },
     // F-27。区分見出しと、区分の中のラン行に出す件数（その区分に入った法規行の数）。0件も「0 件」で出す。
     区分件数:  (n) => `${n} 件`,
+    // F-28 A2。区分見出しの件数。n は区分件数と同じ数、m は印が「対象外」のセルだけ（0 も出す）。
+    区分見出し件数: (n, m) => `${n} 件（うち対象外 ${m}）`,
+    // F-28 A1。人の適用判断が「対象外」のセルに付ける印。判定・色・区分は変えない（B1）。
+    対象外印:   "対象外",
+    対象外要再確認印: "対象外・要再確認",
+    // F-28 A4。LO未入力で判定できない型式ランの数（表示中のランだけ。0件も出す）。
+    判定不能件数: (k) => `判定不能 ラン ${k} 件`,
     // F-27 A7。drop未入力のランを、区分見出しより上にまとめて出す別枠の見出し。
     drop未入力枠: "入力漏れ（LOを迎えたのにdropが空）",
     // 日数の主語は状態ごとに変える（A3）。「規制日まで何日超過」のような混ざった言い方はしない。
@@ -212,7 +219,7 @@ export const pruneCertByReg = (cert, rid) => {
 //
 // 日付はすべて seedDate（今日からの相対日数）で作る。括弧内の数字は「今日から何日」。
 //
-// ■ 型式ランと生産フェーズ（F-25：計10本。drop済み3・LO空1・現在LO〜将来LO 6）
+// ■ 型式ランと生産フェーズ（F-25：計10本。drop済み3・LO空1・現在LO〜将来LO 6。F-28で r11 を足して計11本）
 //   r1  DEMO-0001 000A 新  LO −3300 / drop −2450  … drop済み（いちばん古い指定）
 //   r2  DEMO-0001 000B 継  LO −2440 / drop −1350  … drop済み
 //   r3  DEMO-0002 000B 新  LO −1990 / drop −1350  … drop済み（000Bで型式追加。比較元は選んでいない）
@@ -223,6 +230,7 @@ export const pruneCertByReg = (cert, rid) => {
 //   r8  DEMO-0005 000C 新  LO −200  / drop +120   … 生産中（000Cで型式追加。REG-A2は比較元と同一）
 //   r9  DEMO-0003 001B 継  LO 空    / drop 空     … LO未入力（次のプロジェクト。全法規が判定不能）
 //   r10 DEMO-0004 001B 新  LO +500  / drop 空     … 開発中・drop未定（drop＝∞として判定）
+//   r11 DEMO-0006 001A 新  LO −100  / drop +150   … 生産中（F-28。001Aで型式追加。人の対象外の例を置くため、期限超過2件・黄色予告1件を持つ）
 //
 // ■ 業務状態 → セルの対応表（A1）。**偶然そうなっているデータにしない。**
 //   verify/seed-demo.html がこの表そのものを突き合わせ、崩れても増えてもFAILする（A8）。
@@ -244,12 +252,13 @@ export const pruneCertByReg = (cert, rid) => {
 //   判定関数が返す状態が初期データに1件以上あることは verify/seed-demo.html の F-25 が確かめる。
 //
 // ■ 危険一覧（F-10・F-26）の3区分。期限超過と黄色予告は **r6 だけ** にしてある（F-25 A2）。
+//   F-28 で r11 を足し、期限超過と黄色予告にも人の対象外の例を置けるようにした（r11 は r6 と同じ drop）。
 //   黄色予告は「dropの30日以内に継続車規制日が来る」セルに出る仕様なので、
 //   ドロップ直後に規制日が来るデータなら一覧に並ぶ。
 //   それ自体は仕様どおりだが、**開発中の現物確認では主役（生産中の赤と予告）がぼやける**ため、
 //   r6 以外のランのドロップは、どの法規の継続車規制日からも30日窓の外に置いてある。
 //   ＝ いま30日窓に入りうる継続車規制日は REG-A2(+200)・REG-C(+5)・REG-E(+165) の3つで、
-//      drop が窓に入るランは r6（drop +150 と REG-E の +165）だけになる（r8 の drop +120 は REG-E まで45日）。
+//      drop が窓に入るランは r6・r11（drop +150 と REG-E の +165）だけになる（r8 の drop +120 は REG-E まで45日）。
 //   期限前・未取得は「要・実績なし・未超過」の全セルなので、開発中・生産中の多くのランに出る（F-26）。
 //   drop済みのラン（r1〜r3）はどの区分にも出ない（F-26 A1）。
 //
@@ -281,6 +290,7 @@ export function buildSeed(today = TODAY) {
       {key:"r8", typeId:"DEMO-0005",gen:"000C",sk:"新",lo:d(-200), drop:d(120)},
       {key:"r9", typeId:"DEMO-0003",gen:"001B",sk:"継",lo:"",      drop:""},
       {key:"r10",typeId:"DEMO-0004",gen:"001B",sk:"新",lo:d(500),  drop:""},
+      {key:"r11",typeId:"DEMO-0006",gen:"001A",sk:"新",lo:d(-100), drop:d(150)},
     ],
     // 法規の日付も相対。新型車適用日（shin）と継続車適用日（kei）の間隔は法規ごとに変えてある。
     //   A  … どのランのLOより前に両方の日が来ている古い法規（実績で緑になる）
@@ -324,15 +334,34 @@ export function buildSeed(today = TODAY) {
   // DEMO-0003 は REG-C を取り漏らしている＝現在法規不適合の1件。
   // DEMO-0002 は REG-B を持たない＝r3 は過去に法規不適合、r5 は比較元の番号待ち。
   // DEMO-0005 は REG-A2 を持たない＝同一で継続車日を借りて逃げている（番号は比較元から写していない）。
+  // DEMO-0006（F-28）は REG-B・D・E を持たない＝REG-B・D が期限超過、REG-E が黄色予告（人の対象外の例を置く先）。
   seed.cert = migrateLegacyCert({
     "DEMO-0001": {"DEMO-REG-A":"DEMO*A00/00*01","DEMO-REG-B":"DEMO*B00/00*01","DEMO-REG-D":"DEMO*D00/00*01"},
     "DEMO-0002": {"DEMO-REG-A":"DEMO*A00/00*02","DEMO-REG-D":"DEMO*D00/00*02"},
     "DEMO-0003": {"DEMO-REG-A":"DEMO*A00/00*03","DEMO-REG-A2":"DEMO*A02/00*01","DEMO-REG-B":"DEMO*B00/00*02","DEMO-REG-D":"DEMO*D00/00*03"},
     "DEMO-0004": {"DEMO-REG-A":"DEMO*A00/00*04","DEMO-REG-A2":"DEMO*A02/00*02","DEMO-REG-D":"DEMO*D00/00*04"},
     "DEMO-0005": {"DEMO-REG-A":"DEMO*A00/00*05","DEMO-REG-B":"DEMO*B00/00*03","DEMO-REG-C":"DEMO*C00/00*01","DEMO-REG-D":"DEMO*D00/00*05"},
+    "DEMO-0006": {"DEMO-REG-A":"DEMO*A00/00*06","DEMO-REG-A2":"DEMO*A02/00*03","DEMO-REG-C":"DEMO*C00/00*02"},
   }, seed.runs, seed.regs);
   // 取得予定（F-23）の例。番号は無く、予定だけがある＝車両申請「発生する（計画済み）」。
   seed.cert.push({ runKey:"r7", rid:"g6", ck:"", planned:true });
+  // 人の適用判断（F-28 A5）。危険一覧の3区分それぞれに「対象外」と「対象外・要再確認」を1件以上置く。
+  // 確定時の条件はいまのデータから取る（＝条件は変わっていない）。要再確認は手動で立てた扱い（needsRecheck だけ true）。
+  //   期限超過       … r11×REG-B 対象外（ランの末尾へ寄る）／r11×REG-D 対象外・要再確認（寄らない）。r6×REG-C は判断なし
+  //   期限前・未取得 … r4×REG-C 対象外（r4 の先頭から末尾へ寄り、r4 が r5・r7 より後ろになる）／r7×REG-C 対象外・要再確認
+  //   黄色予告       … r6×REG-E 対象外（r6 は寄った行しか無いので区分の末尾へ）／r11×REG-E 対象外・要再確認
+  // ○あり（r7×REG-E）には判断を付けない（対象外は取得予定を隠すので、計画済みの例が消える）。
+  const runOf = (k) => seed.runs.find((r) => r.key === k), regOf = (rid) => seed.regs.find((r) => r.rid === rid);
+  const exempt = (runKey, rid, needsRecheck, reason) => ({ runKey, rid, state:"対象外", reason,
+    decidedAt:`${d(-2)} 09:00`, needsRecheck, cond: condOf(runOf(runKey), regOf(rid), seed.regs) });
+  seed.decisions = [
+    exempt("r11", "g3", false, "ダミー：対象外と判断した例"),
+    exempt("r11", "g5", true,  "ダミー：対象外と判断したが要再確認の例"),
+    exempt("r4",  "g4", false, "ダミー：対象外と判断した例"),
+    exempt("r7",  "g4", true,  "ダミー：対象外と判断したが要再確認の例"),
+    exempt("r6",  "g6", false, "ダミー：対象外と判断した例"),
+    exempt("r11", "g6", true,  "ダミー：対象外と判断したが要再確認の例"),
+  ];
   return seed;
 }
 
@@ -1318,7 +1347,18 @@ export function buildCellModel({ runs, regs, evalCell, decisions = null, sameCtx
       const basis = basisCtx ? basisCtx.of(run, reg) : null;
       // 危険（F-10・F-26）：決定表の出力だけで3区分のどれかに入れる。どれにも入らないセルは null。
       const risk = riskOfCell(decision, today);
-      const entry = { run, reg, auto, decision, notice, dec, compliance, base, sameRec, sameness, showSame, basis, risk };
+      // 危険一覧の補助表示（F-28）。どちらも表示の導出だけで、判定・区分・保存データには関与しない（B1・B2）。
+      //   exemptMark … 人の適用判断が「対象外」のセルの印。要再確認の見方は帳票の「人：」行と同じ
+      //                （保存済みのフラグ＋いま条件から導かれる理由。掃き出し前でも取りこぼさない）
+      //   riskCompliance … 危険一覧の状態表示。人の対象外で灰に上書きせず、決定表の結果のまま出す（赤を薄くしない）
+      const exemptMark = risk && dec?.state === "対象外"
+        ? (dec.needsRecheck || recheckReasons(dec, run, reg, regs).length > 0 ? "対象外・要再確認" : "対象外")
+        : null;
+      const riskCompliance = risk && auto.status === "leak"
+        ? complianceOfDecision(decision, { lo: run.lo, drop: run.drop, dueDate: auto.dueDate })
+        : null;
+      const entry = { run, reg, auto, decision, notice, dec, compliance, base, sameRec, sameness, showSame, basis, risk,
+        exemptMark, riskCompliance };
       m.set(reg, entry);
       list.push(entry);
     }
@@ -1483,8 +1523,15 @@ export function riskRunRows(model, { runs = null } = {}) {
 //   ランどうし       … そのランの区分内で日数が読める先頭の行で比べる。読める行が無いランは区分の末尾
 //   同順位           … 元の並び（ランの入力順 × 法規の順）のまま（sort は安定）
 // 計画済みは決定表の車両申請を読むだけで、区分・件数には効かない（○の付け外しで並びだけが変わりうる。B4）。
+//
+// ■ 人の対象外（F-28）。セルは区分から外さず、印（buildCellModel の exemptMark）を付けるだけ。
+//   印が「対象外」の行だけを、そのランの中の末尾に寄せる。「対象外・要再確認」は寄せない（A3）。
+//   ランどうしは寄せていない行で比べ、寄せた行しか無いランは区分の末尾（その中は同じ並び）。
+//   exempt … 印が「対象外」のセルの数（A2）。count は変えない
+//   undecidable … LO未入力で判定できないラン（A4）。区分にはもともと入らない（決定表の出力がすべて「いいえ」）
 // ───────────────────────────────────────────────
 const isPlanned = (m) => m.decision.車両申請 === "発生する（計画済み）";
+const isSetAside = (m) => m.exemptMark === "対象外";
 const cmpInSection = (a, b) => {
   if (a.risk.urgency === null || b.risk.urgency === null) {
     return (a.risk.urgency === null) - (b.risk.urgency === null);
@@ -1507,21 +1554,32 @@ export function riskSections(model, { runs = null } = {}) {
   const sections = RISK_KINDS.map((kind) => {
     const rows = [];
     for (const run of order) {
-      const cells = (cellsOf.get(run) || []).filter((m) => m.risk.kind === kind);
-      if (cells.length === 0) continue;
-      cells.sort(cmpInSection);
+      const all = (cellsOf.get(run) || []).filter((m) => m.risk.kind === kind);
+      if (all.length === 0) continue;
+      // 印が「対象外」の行だけを末尾に寄せる（F-28 A3）。各グループの中は F-27 の並びのまま。
+      const kept = all.filter((m) => !isSetAside(m)).sort(cmpInSection);
+      const aside = all.filter(isSetAside).sort(cmpInSection);
+      const cells = [...kept, ...aside];
+      // ラン同士は寄せていない行で比べる。寄せた行しか無いランは、寄せていない行を持つランより後ろ。
+      const group = kept.length > 0 ? kept : aside;
       // 日数が読める先頭の行（読めない行は並べ替えで末尾に来ているので、先頭が読めなければ全部読めない）
-      const top = cells[0].risk.urgency === null ? null : cells[0];
+      const top = group[0].risk.urgency === null ? null : group[0];
       rows.push({
-        run, phase: model.phaseOf(run), cells, top: top ? top.risk : null, head: top,
+        run, phase: model.phaseOf(run), cells, top: top ? top.risk : null, head: top, asideOnly: kept.length === 0,
         unconfirmed: cells.some((m) => m.decision.根拠未確認),
       });
     }
-    rows.sort((a, b) => (!a.head || !b.head) ? (!a.head) - (!b.head) : cmpInSection(a.head, b.head));
-    return { kind, count: rows.reduce((n, r) => n + r.cells.length, 0), rows };
+    rows.sort((a, b) => a.asideOnly !== b.asideOnly ? a.asideOnly - b.asideOnly
+      : (!a.head || !b.head) ? (!a.head) - (!b.head) : cmpInSection(a.head, b.head));
+    const cells = rows.flatMap((r) => r.cells);
+    // count は F-27 のまま（判断済みも数える）。exempt は印が「対象外」のセルだけ（対象外・要再確認は数えない。F-28 A2）
+    return { kind, count: cells.length, exempt: cells.filter(isSetAside).length, rows };
   });
   const alerts = order.filter((run) => model.alertOf?.(run)).map((run) => ({ run, phase: model.phaseOf(run) }));
-  return { sections, alerts };
+  // LO未入力で判定できないラン（F-28 A4）。決定表と同じ見方（dropInputStateOf）で、LOが空のランだけを数える。
+  // 規制日の空欄・drop未入力はここに入れない（B3）。表示中のランだけ（フィルター連動）。
+  const undecidable = order.filter((run) => dropInputStateOf(run.lo, run.drop) === "LO未入力");
+  return { sections, alerts, undecidable };
 }
 
 // 採番の上限。生成できる範囲と読み込める範囲を同じ値にそろえる。
@@ -2435,19 +2493,35 @@ function PlannedMark() {
   );
 }
 
+// 人の適用判断が「対象外」のセルの印（F-28 A1）。状態の表示・色はそのままで、横に添えるだけ（B1）。
+// 要再確認が掛かっているものは帳票の要再確認と同じ橙で、寄せない側であることが見て分かるようにする。
+function ExemptMark({ mark }) {
+  const recheck = mark === "対象外・要再確認";
+  const c = recheck ? AMBER : GRAY;
+  return (
+    <span data-risk-exempt={mark}
+      title={recheck ? "人が対象外と判断したセルですが、判断した時から条件が変わったなどで要再確認です。判定・区分は変えていません。"
+        : "人が対象外と判断したセルです。判定・区分は変えず、区分の末尾に寄せています。"}
+      style={{ display:"inline-flex", alignItems:"center", gap:2, fontSize:9, fontWeight:700, padding:"0 5px", borderRadius:3,
+        border:`1px solid ${c}`, color:c, background:`${c}14`, lineHeight:1.7, marginLeft:5, whiteSpace:"nowrap" }}>
+      {recheck && <AlertTriangle size={9}/>}{recheck ? TEXT.risk.対象外要再確認印 : TEXT.risk.対象外印}
+    </span>
+  );
+}
+
 // 状態。帳票のセルと同じ状態名を出す（A7：マトリクスの状態と一覧の状態が一致する）。
-//   不適合・期限前の行 … F-14の4状態（人が対象外と判断していればその表示になる。判断は一覧に出すか否かには効かない）
+//   不適合・期限前の行 … F-14の4状態。人の対象外では灰に上書きせず、決定表の結果のまま出す（F-28 B1。印は ExemptMark）
 //   予告の行           … 帳票セルと同じ「否・要再確認」
 function RiskState({ m }) {
   if (m.risk.kind === "予告")
     return <><RiskKind kind="予告" /><span style={{ fontSize:11, fontWeight:700, color:AMBER }}>{TEXT.cell.否要再確認}</span></>;
   if (m.risk.kind === "期限前")
-    return <><RiskKind kind="期限前" />{m.compliance
-      ? <ComplianceLabel s={m.compliance} fontSize={11} />
+    return <><RiskKind kind="期限前" />{m.riskCompliance
+      ? <ComplianceLabel s={m.riskCompliance} fontSize={11} />
       : <span style={{ fontSize:11, fontWeight:700, color:ORANGE }}>{TEXT.risk.区分.期限前}</span>}
       {m.decision.車両申請 === "発生する（計画済み）" && <PlannedMark />}</>;
-  return <><RiskKind kind="不適合" />{m.compliance
-    ? <ComplianceLabel s={m.compliance} fontSize={11} />
+  return <><RiskKind kind="不適合" />{m.riskCompliance
+    ? <ComplianceLabel s={m.riskCompliance} fontSize={11} />
     : <span style={{ fontSize:11, fontWeight:800, color:RED }}>{TEXT.compliance.法規不適合()}</span>}</>;
 }
 
@@ -2487,6 +2561,8 @@ function DropMissingMark() {
 // 区分の開閉の既定（F-27 A3）。期限超過と黄色予告は開き、件数の多い期限前・未取得はたたむ。
 // 一時的なUI状態で、保存形式にも dirty にも関与しない。パネルを開き直すたびにこの既定へ戻す（保存HTMLを開いても同じ）。
 const RISK_SECTION_DEFAULT = { 不適合: true, 期限前: false, 予告: true };
+// 判定不能の文字色（F-28 A4）。帳票セルの「判定不能（LO未入力）」と同じ紫系にそろえる。
+const UNDECIDABLE = "#b9adff";
 
 // 型式ランの見出し（プロジェクト・型式・生産フェーズ・LO/drop）。区分の中のラン行と、drop未入力の別枠で同じものを使う。
 function RiskRunLabel({ run, phase }) {
@@ -2545,6 +2621,13 @@ function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
       {open && (
         <div style={{ marginTop:8 }}>
           {/* drop未入力のラン（F-27 A7）。区分見出しより上の別枠。区分の件数には数えない（B3）。 */}
+          {/* LO未入力で判定できないラン（F-28 A4）。3区分には入らないので件数だけを一覧の上に出す。0件でも出す。 */}
+          <div data-risk-undecidable={sections.undecidable.length}
+            style={{ display:"flex", alignItems:"center", gap:6, fontSize:10.5, fontWeight:700, marginBottom:8,
+              color: sections.undecidable.length > 0 ? UNDECIDABLE : MUTE }}>
+            <HelpCircle size={12}/>{TEXT.risk.判定不能件数(sections.undecidable.length)}
+            <span style={{ fontWeight:400, color:MUTE }}>（LOが空のため判定できない型式ラン。下の3区分には入りません）</span>
+          </div>
           {sections.alerts.length > 0 && (
             <div data-risk-alerts="" style={{ border:`1px solid ${RED}66`, borderRadius:8, padding:"6px 10px", marginBottom:8, background:`${RED}0c` }}>
               <div style={{ fontSize:10.5, fontWeight:800, color:RED, marginBottom:4 }}>{TEXT.risk.drop未入力枠}</div>
@@ -2581,7 +2664,7 @@ function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
                           style={{ ...runBtn, fontWeight:800, color:RISK_COLOR[s.kind] }}>
                           <span style={{ color:MUTE, fontSize:9 }}>{sectionOpen[s.kind] ? "▼" : "▶"}</span>
                           {TEXT.risk.区分[s.kind]}
-                          <span style={{ fontSize:10.5 }}>{TEXT.risk.区分件数(s.count)}</span>
+                          <span style={{ fontSize:10.5 }}>{TEXT.risk.区分見出し件数(s.count, s.exempt)}</span>
                         </button>
                       </td>
                     </tr>
@@ -2607,6 +2690,7 @@ function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
                             </td>
                             <td style={td}>
                               <RiskState m={m} />
+                              {m.exemptMark && <ExemptMark mark={m.exemptMark} />}
                               {m.decision.drop未定 && <DropUndecidedMark />}
                               {m.decision.根拠未確認 && <SamenessUnknownMark title={MARK_TITLE} />}
                             </td>
@@ -2644,8 +2728,12 @@ function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><DropUndecidedMark /></span> を付けます（dropが無いので黄色予告には入りません）。
             <b>LOを迎えたのにdropが空</b>のランは入力漏れとして、法規に関係なくラン単位で
             <b style={{ color:RED }}>{TEXT.risk.drop未入力}</b> を区分見出しより上の別枠に出します（法規の件数には数えません）。
-            LOが空のランは判定不能なので出しません（帳票のセルに出ます）。
+            LOが空のランは判定不能なので3区分には出さず、上に<b style={{ color:UNDECIDABLE }}>判定不能</b>のラン数だけを出します（セルは帳票に出ます）。
             状態・規制日・期限は<b>帳票のセルとまったく同じ判定結果</b>で、ここでは束ねて並べているだけです。
+            人が対象外と判断したセルも消さず、状態は判定結果のまま
+            <span style={{ display:"inline-flex", verticalAlign:"middle" }}><ExemptMark mark="対象外" /></span> を付けて区分の末尾に寄せます
+            （見出しの「うち対象外」はこの数）。要再確認が掛かっているものは
+            <span style={{ display:"inline-flex", verticalAlign:"middle" }}><ExemptMark mark="対象外・要再確認" /></span> を付け、寄せずに切迫している順のまま出します。
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><SamenessUnknownMark title={MARK_TITLE} /></span>
             は、比較元があるのに同一性が未回答のセルを含む印です（判定は安全側の新型車側で出しています。印があること自体は一覧に出す理由にしません）。
           </div>

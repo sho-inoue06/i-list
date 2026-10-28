@@ -56,6 +56,7 @@ const L_NONE = "危険な型式ランはありません。";
 const L_MISSING = "drop未入力（LO済み）";
 const L_PLANNED = "計画済み";
 const L_EXEMPT = "対象外（判断済み）";
+const L_VIOLATION = "法規不適合";
 
 // ── ダミーデータ（架空。実車・実法規・実認可番号とは無関係） ──
 // すべて継続ラン（要 ⇔ 継続車規制日 ≤ drop）。並べ替えが効いていることを見るため、
@@ -435,7 +436,8 @@ const SCENARIOS = [
   {
     id: "B5-decided-rows",
     name: "B5・A4：判断済み（対象外）の行は消えず・薄くならず、件数にも数える",
-    expect: "r1×REG-OVER を対象外と判断しても、期限超過は3件のまま。その行は「対象外（判断済み）」で出て、不透明度は他の行と同じ",
+    // F-28：一覧の状態は判定結果のまま（灰の「対象外（判断済み）」に上書きしない）で、印「対象外」を添えて区分の末尾へ寄せる
+    expect: "r1×REG-OVER を対象外と判断しても、期限超過は3件のまま。その行は状態「法規不適合」のまま印「対象外」付きで区分の末尾に出て、不透明度は他の行と同じ",
     async run({ mount, asserts }) {
       const d = clone(MAIN);
       const r1 = d.runs.find((r) => r.key === "r1"), g1 = d.regs.find((g) => g.rid === "g1");
@@ -447,9 +449,12 @@ const SCENARIOS = [
       await openPanel(c);
       await clickInPanel(c, /すべて展開/);
       const rows = view(c).find((s) => s.kind === "不適合").runs;
-      asserts.check("期限超過のランは同じ", rows.map((r) => typeOf(r.head)), ["TYPE-A", "TYPE-B", "TYPE-C"]);
-      const tr = rows[0].regs[0];
-      asserts.checkTrue("判断済みの行が出ている", regOf(tr) === "REG-OVER" && tr.textContent.includes(L_EXEMPT));
+      // r1 の期限超過は対象外の1行だけなので、r1 ごと区分の末尾へ寄る（F-28 A3）
+      asserts.check("期限超過のランは同じ（対象外だけのランは末尾）", rows.map((r) => typeOf(r.head)), ["TYPE-B", "TYPE-C", "TYPE-A"]);
+      const tr = rows[2].regs[0];
+      asserts.checkTrue("判断済みの行が出ている（状態は法規不適合のまま・印は対象外）", regOf(tr) === "REG-OVER" &&
+        tr.textContent.includes(L_VIOLATION) && !tr.textContent.includes(L_EXEMPT) &&
+        tr.querySelector("[data-risk-exempt]")?.getAttribute("data-risk-exempt") === "対象外");
       const op = (el) => [el, ...el.querySelectorAll("*")].map((x) => getComputedStyle(x).opacity);
       asserts.check("判断済みの行は薄くならない（全要素の不透明度が1）", op(tr).every((x) => x === "1"), true);
       asserts.check("文字色は他の期限超過の行と同じ", getComputedStyle(tr.children[0]).color, getComputedStyle(rows[1].regs[0].children[0]).color);
