@@ -70,8 +70,8 @@ const L_VIOLATION = "法規不適合";
 //
 // 人の判断（rB×REG-OVER は「対象」＝印なし）
 //   期限超過       … rA×OVER 対象外（rA ごと区分の末尾へ）／rC×OVER 対象外・要再確認（保存済みのフラグ）
-//   期限前・未取得 … rA×K15 対象外（rA の末尾へ。rA が rC より後ろになる）／rA×K50 対象外・要再確認（確定時から条件が変わった）
-//   黄色予告       … rC×K50 対象外（rC の末尾へ）
+//   期限前・未取得 … rA×K15 対象外（区分の末尾の段へ。rA は上の段（K50・K60）と末尾の段の2回出る）／rA×K50 対象外・要再確認（確定時から条件が変わった）
+//   黄色予告       … rC×K50 対象外（区分の末尾の段へ。rC は上の段（K60）と末尾の段の2回出る）
 const LONG_AGO = shift(-3650), FAR = shift(3650);
 const run = (key, typeId, gen, lo, drop) => ({ key, typeId, gen, sk: "継", lo, drop });
 const reg = (rid, id, kei, shin = LONG_AGO) => ({ rid, id, label: "ダミー法規", shin, kei, parent: "" });
@@ -111,8 +111,8 @@ const NO_DECISIONS = { ...clone(MAIN), decisions: [] };
 // 期待する区分（[型式, [[法規, 印]…]] の並び）。印の無い行は ""。
 const WANT = {
   不適合: [["TYPE-B", [["REG-OVER", ""]]], ["TYPE-C", [["REG-OVER", M_RECHECK]]], ["TYPE-A", [["REG-OVER", M_EXEMPT]]]],
-  期限前: [["TYPE-C", [["REG-K15", ""]]], ["TYPE-A", [["REG-K50", M_RECHECK], ["REG-K60", ""], ["REG-K15", M_EXEMPT]]]],
-  予告: [["TYPE-B", [["REG-K15", ""]]], ["TYPE-C", [["REG-K60", ""], ["REG-K50", M_EXEMPT]]]],
+  期限前: [["TYPE-C", [["REG-K15", ""]]], ["TYPE-A", [["REG-K50", M_RECHECK], ["REG-K60", ""]]], ["TYPE-A", [["REG-K15", M_EXEMPT]]]],
+  予告: [["TYPE-B", [["REG-K15", ""]]], ["TYPE-C", [["REG-K60", ""]]], ["TYPE-C", [["REG-K50", M_EXEMPT]]]],
 };
 // 判断が無いときの並び（F-27 のまま）
 const WANT_PLAIN = {
@@ -330,14 +330,20 @@ const SCENARIOS = [
   },
   {
     id: "A3-set-aside",
-    name: "A3：印が「対象外」の行だけを末尾に寄せる。要再確認は寄せない。各グループの中は F-27 の並び",
-    expect: "期限超過：B → C（要再確認は寄らない）→ A（対象外だけのランは末尾）。期限前：C → A（A の中は K50・K60 → 寄せた K15）。黄色予告：C の中は K60 → 寄せた K50。判断なしなら F-27 の並び",
+    name: "A3：印が「対象外」の行だけを区分の末尾に寄せる。要再確認は寄せない。各グループの中は F-27 の並び",
+    expect: "期限超過：B → C（要再確認は寄らない）→ 末尾の段 A。期限前：C → A（K50・K60）→ 末尾の段 A（K15）。黄色予告：B → C（K60）→ 末尾の段 C（K50）。対象外の行の後に、対象外でない行が来ない。判断なしなら F-27 の並び",
     async run({ mount, asserts }) {
       const p = modelOf(NO_DECISIONS);
       asserts.check("判断なしは F-27 の並び", secPlain(riskSections(p.model, { runs: p.runs })), WANT_PLAIN);
       const { model, runs } = modelOf(MAIN);
       const sec = riskSections(model, { runs });
       asserts.check("寄せた後の並び", secSig(sec), WANT);
+      // 区分全体で見て、対象外の行の後に対象外でない行が来ない（Codexレビュー指摘1）
+      asserts.check("各区分で対象外の行は末尾にまとまる", sec.sections.map((s) => {
+        const marks = s.rows.flatMap((r) => r.cells.map((m) => m.exemptMark === "対象外"));
+        return marks.indexOf(true) === -1 || marks.slice(marks.indexOf(true)).every(Boolean);
+      }), [true, true, true]);
+      asserts.check("末尾の段だけが aside", sec.sections.map((s) => s.rows.map((r) => r.aside)), [[false, false, true], [false, false, true], [false, false, true]]);
       // 寄せたグループの中も F-27 の並び：rA の期限前を全部対象外にすると、K15 → K50 → K60（期限の近い順）のまま末尾
       const d = clone(MAIN);
       d.decisions = d.decisions.filter((x) => !(x.runKey === "rA" && ["g2", "g3"].includes(x.rid)));
@@ -354,6 +360,13 @@ const SCENARIOS = [
       asserts.check("並び（画面）", shown(c), WANT);
       const aHead = view(c).find((s) => s.kind === "期限前").runs.find((r) => typeOf(r.head) === "TYPE-A").head;
       asserts.checkTrue("ラン行の日数は寄せていない行から（期限まで 50 日）", aHead.textContent.includes("期限まで 50 日"));
+      // 同じランの2つの段は別々に開閉する（展開状態が段で区別されている）
+      await clickInPanel(c, /すべてたたむ/);
+      await clickSection(c, "期限前");
+      const aRuns = () => view(c).find((s) => s.kind === "期限前").runs.filter((r) => typeOf(r.head) === "TYPE-A");
+      aRuns()[1].head.querySelector("button").click(); await sleep(40);
+      asserts.check("末尾の段だけを開ける", aRuns().map((r) => r.regs.map(regOf2)), [[], ["REG-K15"]]);
+      asserts.check("末尾の段のラン行に対象外の印", aRuns().map((r) => r.head.hasAttribute("data-risk-aside")), [false, true]);
     },
   },
   {
@@ -405,6 +418,20 @@ const SCENARIOS = [
       const c0 = await mountWith(mount, d0);
       await openPanel(c0);
       asserts.check("LO未入力のランが無いデータ", undecidableText(c0), L_UNDECIDABLE(0));
+    },
+  },
+  {
+    id: "A4-no-regs",
+    name: "A4：法規が0件でも、LO未入力のランがあれば判定不能の件数を出す（Codexレビュー指摘2）",
+    expect: "LOが空のラン1本・法規0件のデータで、危険一覧のパネルが出て「判定不能 ラン 1 件」。LOのあるラン1本・法規0件ならパネルは出ない（従来どおり）",
+    async run({ mount, asserts }) {
+      const base = { schemaVersion: 2, regs: [], cert: [], decisions: [], bases: [], sameness: [] };
+      const c = await mountWith(mount, { ...base, runs: [run("rL", "TYPE-L", "PJ-X", "", "")] });
+      asserts.checkTrue("パネルが出る", !!panelToggle(c));
+      await openPanel(c);
+      asserts.check("判定不能の件数", undecidableText(c), L_UNDECIDABLE(1));
+      const c2 = await mountWith(mount, { ...base, runs: [run("rA", "TYPE-A", "PJ-X", LONG_AGO, FAR)] });
+      asserts.check("判定不能が0件・警告も無いならパネルは出ない（従来どおり）", !!panelToggle(c2), false);
     },
   },
   {

@@ -1525,8 +1525,9 @@ export function riskRunRows(model, { runs = null } = {}) {
 // 計画済みは決定表の車両申請を読むだけで、区分・件数には効かない（○の付け外しで並びだけが変わりうる。B4）。
 //
 // ■ 人の対象外（F-28）。セルは区分から外さず、印（buildCellModel の exemptMark）を付けるだけ。
-//   印が「対象外」の行だけを、そのランの中の末尾に寄せる。「対象外・要再確認」は寄せない（A3）。
-//   ランどうしは寄せていない行で比べ、寄せた行しか無いランは区分の末尾（その中は同じ並び）。
+//   印が「対象外」の行だけを、区分全体の末尾に寄せる。「対象外・要再確認」は寄せない（A3）。
+//   区分は「寄せていない行のラン群 → 寄せた行のラン群」の2段で、どちらも中の並びは F-27 のまま。
+//   寄せていない行と寄せた行の両方を持つランは、同じ区分に2回（前段と後段に1回ずつ）出る（aside で区別する）。
 //   exempt … 印が「対象外」のセルの数（A2）。count は変えない
 //   undecidable … LO未入力で判定できないラン（A4）。区分にはもともと入らない（決定表の出力がすべて「いいえ」）
 // ───────────────────────────────────────────────
@@ -1552,25 +1553,23 @@ export function riskSections(model, { runs = null } = {}) {
     cellsOf.get(m.run).push(m);
   }
   const sections = RISK_KINDS.map((kind) => {
-    const rows = [];
-    for (const run of order) {
-      const all = (cellsOf.get(run) || []).filter((m) => m.risk.kind === kind);
-      if (all.length === 0) continue;
-      // 印が「対象外」の行だけを末尾に寄せる（F-28 A3）。各グループの中は F-27 の並びのまま。
-      const kept = all.filter((m) => !isSetAside(m)).sort(cmpInSection);
-      const aside = all.filter(isSetAside).sort(cmpInSection);
-      const cells = [...kept, ...aside];
-      // ラン同士は寄せていない行で比べる。寄せた行しか無いランは、寄せていない行を持つランより後ろ。
-      const group = kept.length > 0 ? kept : aside;
-      // 日数が読める先頭の行（読めない行は並べ替えで末尾に来ているので、先頭が読めなければ全部読めない）
-      const top = group[0].risk.urgency === null ? null : group[0];
-      rows.push({
-        run, phase: model.phaseOf(run), cells, top: top ? top.risk : null, head: top, asideOnly: kept.length === 0,
-        unconfirmed: cells.some((m) => m.decision.根拠未確認),
-      });
-    }
-    rows.sort((a, b) => a.asideOnly !== b.asideOnly ? a.asideOnly - b.asideOnly
-      : (!a.head || !b.head) ? (!a.head) - (!b.head) : cmpInSection(a.head, b.head));
+    // 印が「対象外」の行だけを区分の末尾に寄せる（F-28 A3）。前段・後段それぞれの中は F-27 の並びのまま。
+    const groupRows = (aside) => {
+      const rows = [];
+      for (const run of order) {
+        const cells = (cellsOf.get(run) || []).filter((m) => m.risk.kind === kind && isSetAside(m) === aside);
+        if (cells.length === 0) continue;
+        cells.sort(cmpInSection);
+        // 日数が読める先頭の行（読めない行は並べ替えで末尾に来ているので、先頭が読めなければ全部読めない）
+        const top = cells[0].risk.urgency === null ? null : cells[0];
+        rows.push({
+          run, phase: model.phaseOf(run), cells, top: top ? top.risk : null, head: top, aside,
+          unconfirmed: cells.some((m) => m.decision.根拠未確認),
+        });
+      }
+      return rows.sort((a, b) => (!a.head || !b.head) ? (!a.head) - (!b.head) : cmpInSection(a.head, b.head));
+    };
+    const rows = [...groupRows(false), ...groupRows(true)];
     const cells = rows.flatMap((r) => r.cells);
     // count は F-27 のまま（判断済みも数える）。exempt は印が「対象外」のセルだけ（対象外・要再確認は数えない。F-28 A2）
     return { kind, count: cells.length, exempt: cells.filter(isSetAside).length, rows };
@@ -2581,11 +2580,13 @@ function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
   const [open, setOpen] = useState(false);
   const [sectionOpen, setSectionOpen] = useState(RISK_SECTION_DEFAULT);
   // 展開中の型式ラン（区分ごと）。同じランが複数の区分に出るので「区分＋ランのオブジェクト」で持つ（key は重複しうる）。
+  // F-28：同じ区分の中でも、寄せていない行の段と寄せた行（対象外）の段に同じランが出るので aside も持つ。
   const [expanded, setExpanded] = useState([]);
   const cellCount = rows.reduce((n, r) => n + r.cells.length, 0);
-  const isOpen = (kind, run) => expanded.some((x) => x.kind === kind && x.run === run);
-  const toggle = (kind, run) => setExpanded(isOpen(kind, run)
-    ? expanded.filter((x) => !(x.kind === kind && x.run === run)) : [...expanded, { kind, run }]);
+  const same = (x, kind, r) => x.kind === kind && x.run === r.run && x.aside === r.aside;
+  const isOpen = (kind, r) => expanded.some((x) => same(x, kind, r));
+  const toggle = (kind, r) => setExpanded(isOpen(kind, r)
+    ? expanded.filter((x) => !same(x, kind, r)) : [...expanded, { kind, run: r.run, aside: r.aside }]);
   const toggleSection = (kind) => setSectionOpen({ ...sectionOpen, [kind]: !sectionOpen[kind] });
   const togglePanel = () => {
     // 開き直すと既定に戻す（A3）。閉じている間の状態は持ち越さない。
@@ -2593,10 +2594,10 @@ function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
     setOpen(!open);
   };
   const filled = sections.sections.filter((s) => s.rows.length > 0);
-  const allOpen = filled.length > 0 && filled.every((s) => sectionOpen[s.kind] && s.rows.every((r) => isOpen(s.kind, r.run)));
+  const allOpen = filled.length > 0 && filled.every((s) => sectionOpen[s.kind] && s.rows.every((r) => isOpen(s.kind, r)));
   const setAll = (v) => {
     setSectionOpen(Object.fromEntries(RISK_KINDS.map((k) => [k, v])));
-    setExpanded(v ? filled.flatMap((s) => s.rows.map((r) => ({ kind: s.kind, run: r.run }))) : []);
+    setExpanded(v ? filled.flatMap((s) => s.rows.map((r) => ({ kind: s.kind, run: r.run, aside: r.aside }))) : []);
   };
   const hasRisk = rows.length > 0;
   const MARK_TITLE = "比較元を選んでいるのに同一性が未回答のセルを含みます。判定は安全側（新型車側）で出しています。";
@@ -2671,19 +2672,21 @@ function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
                     {sectionOpen[s.kind] && s.rows.map((r, i) => (
                       <React.Fragment key={`run:${s.kind}:${i}`}>
                         {/* ラン行（A2）。人は「どの車が危ないか」を先に見るので、法規より先に型式ランを出す。 */}
-                        <tr data-risk-run={s.kind}>
+                        <tr data-risk-run={s.kind} data-risk-aside={r.aside ? "" : undefined}>
                           <td colSpan={6} style={{ ...td, background:"rgba(90,107,125,0.10)", padding:"7px 8px 7px 20px" }}>
-                            <button onClick={()=>toggle(s.kind, r.run)} style={runBtn}>
-                              <span style={{ color:MUTE, fontSize:9 }}>{isOpen(s.kind, r.run) ? "▼" : "▶"}</span>
+                            <button onClick={()=>toggle(s.kind, r)} style={runBtn}>
+                              <span style={{ color:MUTE, fontSize:9 }}>{isOpen(s.kind, r) ? "▼" : "▶"}</span>
                               <RiskRunLabel run={r.run} phase={r.phase} />
                             </button>
                             <span style={{ marginLeft:10, fontSize:10.5, color:"#aab8c6" }}>{TEXT.risk.区分件数(r.cells.length)}</span>
                             <span style={{ marginLeft:10, fontSize:10.5 }}><RiskDays risk={r.top || r.cells[0].risk} /></span>
                             {r.unconfirmed && <SamenessUnknownMark title={MARK_TITLE} />}
+                            {/* 区分の末尾に寄せた段（F-28 A3）。同じランが上の段にも出ることがあるので、段であることを添える */}
+                            {r.aside && <ExemptMark mark="対象外" />}
                           </td>
                         </tr>
                         {/* 法規行（展開したときだけ）。その区分の法規行だけを、切迫している順に出す。 */}
-                        {isOpen(s.kind, r.run) && r.cells.map((m, j) => (
+                        {isOpen(s.kind, r) && r.cells.map((m, j) => (
                           <tr key={`cell:${s.kind}:${i}:${j}`}>
                             <td style={{ ...td, fontSize:11.5, color:"#eef4fa", paddingLeft:34 }}>
                               {m.reg.id}<div style={{ fontSize:9, color:MUTE }}>{m.reg.label}</div>
@@ -2731,7 +2734,8 @@ function RiskPanel({ rows, sections, filterActive, shownRuns, totalRuns }) {
             LOが空のランは判定不能なので3区分には出さず、上に<b style={{ color:UNDECIDABLE }}>判定不能</b>のラン数だけを出します（セルは帳票に出ます）。
             状態・規制日・期限は<b>帳票のセルとまったく同じ判定結果</b>で、ここでは束ねて並べているだけです。
             人が対象外と判断したセルも消さず、状態は判定結果のまま
-            <span style={{ display:"inline-flex", verticalAlign:"middle" }}><ExemptMark mark="対象外" /></span> を付けて区分の末尾に寄せます
+            <span style={{ display:"inline-flex", verticalAlign:"middle" }}><ExemptMark mark="対象外" /></span> を付けて区分の末尾にまとめます
+            （同じランの対象外でない行は上に残るので、そのランは区分に2回出ることがあります）
             （見出しの「うち対象外」はこの数）。要再確認が掛かっているものは
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><ExemptMark mark="対象外・要再確認" /></span> を付け、寄せずに切迫している順のまま出します。
             <span style={{ display:"inline-flex", verticalAlign:"middle" }}><SamenessUnknownMark title={MARK_TITLE} /></span>
@@ -2813,7 +2817,8 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
   const riskSec = useMemo(() => riskSections(model, { runs: visibleRuns }), [model, visibleRuns]);
 
   // 法規が0件でも、ラン単位の異常（F-24 A4「drop未入力（LO済み）」）は危険一覧に出す（Codexレビュー指摘1）。
-  const riskOnly = riskRows.length > 0
+  // LO未入力のランの件数（F-28 A4）も同じ扱い：法規が0件でも判定不能のランがあれば出す（Codexレビュー指摘2）。
+  const riskOnly = riskRows.length > 0 || riskSec.undecidable.length > 0
     ? <RiskPanel rows={riskRows} sections={riskSec} filterActive={filterActive} shownRuns={visibleRuns.length} totalRuns={runs.length} />
     : null;
   if (runs.length===0 || regs.length===0) {

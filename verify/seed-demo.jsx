@@ -387,16 +387,17 @@ const SCENARIOS = [
       await clickInPanel(c, /すべて展開/);
       const groups = riskGroups(c);
       // F-27：区分ごとにラン行が出る。DEMO-0003 は期限超過と黄色予告の両方に出る
-      // F-28：人の対象外の行は寄せる。期限前は r4（DEMO-0001）の REG-C が寄って r4 が r7 の後ろへ、
-      //       黄色予告は r6（DEMO-0003）の行が対象外だけなので区分の末尾へ
-      asserts.check("一覧に出るラン（区分ごと）", groups.map((g) => [g.section, g.head.textContent.match(/DEMO-\d{4}/)?.[0]]),
-        [["不適合", "DEMO-0003"], ["不適合", "DEMO-0006"], ["期限前", "DEMO-0002"], ["期限前", "DEMO-0004"], ["期限前", "DEMO-0001"],
-         ["期限前", "DEMO-0004"], ["予告", "DEMO-0006"], ["予告", "DEMO-0003"]]);
+      // F-28：印が「対象外」の行は区分の末尾の段へ寄せる（同じランが上の段にも出る）。
+      //       期限超過は r11（DEMO-0006）の REG-B、期限前は r4（DEMO-0001）の REG-C、黄色予告は r6（DEMO-0003）の REG-E が末尾の段
+      asserts.check("一覧に出るラン（区分ごと）", groups.map((g) => [g.section, g.head.textContent.match(/DEMO-\d{4}/)?.[0], g.head.hasAttribute("data-risk-aside")]),
+        [["不適合", "DEMO-0003", false], ["不適合", "DEMO-0006", false], ["不適合", "DEMO-0006", true],
+         ["期限前", "DEMO-0002", false], ["期限前", "DEMO-0004", false], ["期限前", "DEMO-0001", false], ["期限前", "DEMO-0004", false], ["期限前", "DEMO-0001", true],
+         ["予告", "DEMO-0006", false], ["予告", "DEMO-0003", true]]);
       asserts.check("先頭のラン行はその区分の件数", groups[0].head.textContent.includes("1 件"), true);
       const regIds = (g) => g.regs.map((tr) => tr.children[0].textContent.match(/DEMO-REG-[A-Z0-9]+/)?.[0]);
-      asserts.check("DEMO-0003 の法規行（期限超過／黄色予告）", [regIds(groups[0]), regIds(groups[7])], [["DEMO-REG-C"], ["DEMO-REG-E"]]);
+      asserts.check("DEMO-0003 の法規行（期限超過／黄色予告）", [regIds(groups[0]), regIds(groups[9])], [["DEMO-REG-C"], ["DEMO-REG-E"]]);
       asserts.checkTrue("不適合が見える（期限を過ぎてn日）", /期限を過ぎて \d+ 日/.test(groups[0].regs[0].textContent));
-      asserts.checkTrue("予告が見える（継続車規制日まで n 日）", /継続車規制日まで \d+ 日（dropの \d+ 日後）/.test(groups[7].regs[0].textContent));
+      asserts.checkTrue("予告が見える（継続車規制日まで n 日）", /継続車規制日まで \d+ 日（dropの \d+ 日後）/.test(groups[9].regs[0].textContent));
       // 一覧に並ぶランはすべて drop前（生産中・開発中）であること。**これがF-20の差し戻しで加わった条件**
       const { model, runs } = stateMapOf(SEED);
       const rows = riskRunRows(model, { runs });
@@ -410,13 +411,13 @@ const SCENARIOS = [
       // 出さないもの・出るもの（F-26）
       const panelText = panelEl(c).textContent;
       const regsOf = (i) => groups[i].regs.map((tr) => tr.children[0].textContent.match(/DEMO-REG-[A-Z0-9]+/)?.[0]);
-      asserts.check("法規適合必要（r7・開発中）は期限前で出る。認可番号待ちの REG-B は出ない", regsOf(3), ["DEMO-REG-C", "DEMO-REG-E"]);
-      asserts.check("認可番号待ちの r5×REG-B も出ない", regsOf(2).includes("DEMO-REG-B"), false);
-      const r7E = groups[3].regs[1];
+      asserts.check("法規適合必要（r7・開発中）は期限前で出る。認可番号待ちの REG-B は出ない", regsOf(4), ["DEMO-REG-C", "DEMO-REG-E"]);
+      asserts.check("認可番号待ちの r5×REG-B も出ない", regsOf(3).includes("DEMO-REG-B"), false);
+      const r7E = groups[4].regs[1];
       asserts.checkTrue("○ありの r7×REG-E は期限前・未取得で計画済みの印", /期限前・未取得/.test(r7E.textContent) && r7E.textContent.includes("計画済み"));
-      asserts.check("○なしのセルに計画済みは付かない", groups[3].regs[0].textContent.includes("計画済み"), false);
+      asserts.check("○なしのセルに計画済みは付かない", groups[4].regs[0].textContent.includes("計画済み"), false);
       asserts.checkTrue("drop未定の r10 は drop未定の印つきで期限前（黄色予告に入らない）",
-        groups[5].regs.every((tr) => tr.textContent.includes("drop未定") && tr.textContent.includes("期限前・未取得")));
+        groups[6].regs.every((tr) => tr.textContent.includes("drop未定") && tr.textContent.includes("期限前・未取得")));
       asserts.check("drop済みの 000A は一覧に出ない", panelText.includes("000A"), false);
       asserts.check("過去に法規不適合（r3×REG-B）の 000B は一覧に出ない", panelText.includes("000B"), false);
       // 帳票側には残っている
