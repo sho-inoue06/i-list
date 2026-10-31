@@ -49,6 +49,7 @@ export const TEXT = {
     生産中:   "生産中",
     "drop済み": "drop済み",
   },
+  runHeader: { LO未入力: "LO未入力" },
   // 危険な型式ランの一覧（F-10・F-26）。**危険かどうかの条件・しきい値はここに置かない**
   // （並べる条件は decideCell の出力だけで決まる。ここは「その結果をどう呼ぶか」だけ）。
   risk: {
@@ -2869,18 +2870,20 @@ export function MatrixView({ runs, regs, evalCell, summary, colorOf, decisions, 
         <table style={{ borderCollapse:"separate", borderSpacing:5, width:"100%" }}>
           <thead><tr>
             <th style={{ textAlign:"left", padding:"4px 8px", fontSize:10.5, color:MUTE, minWidth:150 }}>法規 \ 型式ラン</th>
-            {visibleRuns.map(run=>{ const col=colorOf(run.typeId); return (
+            {visibleRuns.map(run=>{ const col=colorOf(run.typeId);
+              const loMissing = dropInputStateOf(run.lo, run.drop) === "LO未入力";
+              return (
               <th key={run.key} style={{ padding:"4px 6px", minWidth:138, verticalAlign:"top" }}>
                 <div style={{ display:"inline-flex", alignItems:"center", gap:4 }}>
                   <span style={{ width:7,height:7,borderRadius:2,background:col }}/>
                   <span style={{ fontFamily:"ui-monospace, monospace", fontSize:12.5, color:"#eef4fa", fontWeight:700, borderBottom:`2px solid ${col}` }}>{run.typeId}</span>
                 </div>
                 <div style={{ fontSize:9.5, color:"#6b7d90", margin:"2px 0" }}>{run.gen}・{run.sk==="新"?"新型/指定":"継続/既指定"}</div>
-                {/* 生産フェーズ（F-19 C5）。LO・drop・今日だけで決まる1語で、セルの状態名とは混ぜない。 */}
+                {/* F-29：LOが空なら見出しだけを置き換える。判定に使う生産フェーズは変えない。 */}
                 <div style={{ fontSize:9.5, margin:"2px 0" }}>
-                  <span style={{ display:"inline-block", padding:"1px 6px", borderRadius:999, color:"#8fa3b8",
+                  <span style={{ display:"inline-block", padding:"1px 6px", borderRadius:999, color:loMissing ? UNDECIDABLE : "#8fa3b8",
                     border:`1px solid ${LINE}`, background:"rgba(90,107,125,0.12)", fontWeight:700 }}>
-                    {TEXT.phase[model.phaseOf(run)] || ""}</span>
+                    {loMissing ? TEXT.runHeader.LO未入力 : TEXT.phase[model.phaseOf(run)] || ""}</span>
                 </div>
                 <div style={{ fontSize:9, color:MUTE, fontFamily:"ui-monospace,monospace" }}>LO {fmt(run.lo)}<br/>drop {fmt(run.drop)}</div>
                 {sameCtx && <BaseLabel base={sameCtx.base(run)} />}
