@@ -61,19 +61,3 @@ $CLAUDE_BIN -p "$PROMPT" \
 2026-09-24、読み取り専用の接続試験とダミー差分レビューに成功。
 claude-sonnet-5 / effort low で完成条件番号と再現手順付きの指摘を取得。
 Git状態は前後で不変。
-
-【禁止】
-
-- AGENTS.md、README.md、docs/current-task.md、docs/codex-review.md の変更
-- stage、commit、push
-- Claude Code起動
-- .claude/、.agents/ の作成
-- Notion、Web、MCP
-
-【最終確認】
-
-- branch、HEAD、git status --short、stage
-- 新規3ファイルのパスと内容一致
-- 既存ファイルに変更がないこと
-
-報告して停止してください。
