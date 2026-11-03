@@ -376,7 +376,7 @@ const SCENARIOS = [
   {
     id: "A2-risk-panel",
     name: "危険一覧のパネルが、JSON読込なしで件数を出し、開くと drop前のランの3区分が見える（F-26）",
-    expect: "閉じたパネルに「6 ラン・16 件」。期限超過に DEMO-0003・DEMO-0006、期限前・未取得に4ラン、黄色予告に DEMO-0006・DEMO-0003（F-27の区分見出しごと。F-28の対象外の寄せを含む）。認可番号待ち・過去に法規不適合・drop済みランは出ない。○ありは計画済み",
+    expect: "閉じたパネルに「6 ラン・16 件」。期限超過に DEMO-0003・DEMO-0006、期限前・未取得に4ラン、黄色予告に DEMO-0006・DEMO-0003（F-27の区分見出しごと。F-28の対象外の寄せを含む）。認可番号待ち・過去に法規不適合・drop済みランは出ない。○ありは計画済み（対象外・要再確認の r7×REG-C も、対象外の印と並ぶ。F-42）",
     async run({ mount, asserts }) {
       const c = mount(undefined).container;
       await sleep(80);
@@ -415,7 +415,10 @@ const SCENARIOS = [
       asserts.check("認可番号待ちの r5×REG-B も出ない", regsOf(3).includes("DEMO-REG-B"), false);
       const r7E = groups[4].regs[1];
       asserts.checkTrue("○ありの r7×REG-E は期限前・未取得で計画済みの印", /期限前・未取得/.test(r7E.textContent) && r7E.textContent.includes("計画済み"));
-      asserts.check("○なしのセルに計画済みは付かない", groups[4].regs[0].textContent.includes("計画済み"), false);
+      // F-42 A4/A5：r7 の先頭の REG-C は対象外・要再確認＋○。対象外の印と計画済みの印が両方出る
+      const r7C = groups[4].regs[0];
+      asserts.checkTrue("対象外＋○の r7×REG-C に対象外・要再確認と計画済みの両方の印", /DEMO-REG-C/.test(r7C.textContent) && r7C.textContent.includes("対象外・要再確認") && r7C.textContent.includes("計画済み"));
+      asserts.check("○なしのセル（r5）に計画済みは付かない", groups[3].regs.some((tr) => tr.textContent.includes("計画済み")), false);
       asserts.checkTrue("drop未定の r10 は drop未定の印つきで期限前（黄色予告に入らない）",
         groups[6].regs.every((tr) => tr.textContent.includes("drop未定") && tr.textContent.includes("期限前・未取得")));
       asserts.check("drop済みの 000A は一覧に出ない", panelText.includes("000A"), false);
@@ -554,8 +557,9 @@ const SCENARIOS = [
       asserts.check("cert の各件は { runKey, rid, ck, planned } だけ",
         [...new Set(SEED.cert.map((c) => Object.keys(c).sort().join(",")))], ["ck,planned,rid,runKey"]);
       // F-22 B3の時点では器だけで全件 false だった。F-23で入力UIができたので、F-25で例を1件入れた
-      asserts.check("取得予定は r7×REG-E の1件だけ（番号は空）",
-        SEED.cert.filter((c) => c.planned !== false).map((c) => [c.runKey, c.rid, c.ck, c.planned]), [["r7", "g6", "", true]]);
+      // F-42 A5 で対象外・要再確認の r7×REG-C にも○を足した
+      asserts.check("取得予定は r7×REG-E・r7×REG-C の2件だけ（番号は空）",
+        SEED.cert.filter((c) => c.planned !== false).map((c) => [c.runKey, c.rid, c.ck, c.planned]), [["r7", "g6", "", true], ["r7", "g4", "", true]]);
       asserts.check("引き継ぎ確認中は製品データでは起きない",
         model.list.some((m) => m.decision.表示 === "引き継ぎ確認中"), false);
     },

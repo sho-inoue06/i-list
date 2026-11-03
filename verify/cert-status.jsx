@@ -53,14 +53,15 @@ async function verify(){
   d=data();d.regs[0]=reg("g901","DUMMY-REG",shift(200),shift(500));check("A1 否は前例があっても否",view(d).cell.decision.表示,"否");
   d.cert=[];check("A4 否でも未来LOなら○を付けられる",[view(d).cell.decision.表示,view(d).cell.auto.canPlan],["否",true]);d.cert=setCertPlanned(d.cert,"r902","g901",true);check("A5/A6 否の○も決定表へ渡す",[view(d).cell.auto.planned,view(d).cell.auto.certPlan,view(d).cell.decision.表示],[true,"実績なし+予定あり","否"]);
   d=data();d.decisions=[{runKey:"r902",rid:"g901",state:"対象外",reason:"ダミー",decidedAt:"",needsRecheck:false,cond:null}];check("B11 対象外にも前例→待ち、人の行を保持",[view(d).cell.decision.表示,view(d).cell.dec.state,view(d).cell.compliance],["引き継ぎ確認中","対象外",null]);
-  d.cert=[];check("A4/A5 対象外は○非表示・入力不可",[view(d).cell.auto.planVisible,view(d).cell.auto.canPlan],[false,false]);
+  d.cert=[];check("F-42 A1 対象外でも○の欄が出て、未来LOなら付けられる",[view(d).cell.auto.planVisible,view(d).cell.auto.canPlan],[true,true]);
   d=data();d.cert=[];check("A4 前例なし未来LOは付けられる",view(d).cell.auto.canPlan,true);
   d.cert=setCertPlanned(d.cert,"r902","g901",true);check("A6 ○→計画済み、実績にはならない",[view(d).cell.decision.車両申請,view(d).cell.decision.表示],["発生する（計画済み）","申請発生"]);
   for(const lo of [shift(-1),TODAY,shift(1)]){d.runs[1].lo=lo;const v=view(d).cell.auto;check(`A4/A5/B7 LO=${lo}`,[v.planVisible,v.planned,v.canPlan],[true,true,lo>TODAY]);}
   const riskBefore=riskSignature(view(d));d.cert=setCertPlanned(d.cert,"r902","g901",false);check("B5 危険一覧の行と件数は○の有無で同じ",riskSignature(view(d)),riskBefore);check("A6 ○なしは未計画",view(d).cell.decision.車両申請,"発生する（未計画）");
   d=data();d.cert=[record("r902","g901","",true)];
   for(const condition of ["precedent","lo","ck","excluded"]){let hidden=clone(d);if(condition==="precedent")hidden.cert.push(record("r901","g901","DUMMY*01"));if(condition==="lo")hidden.runs[1].lo="";if(condition==="ck")hidden.cert=setCertNumber(hidden.cert,"r902","g901"," DUMMY*02 ");if(condition==="excluded")hidden.decisions=[{runKey:"r902",rid:"g901",state:"対象外"}];
-    check(`A10 ${condition}で○を隠し保存値は保持`,[view(hidden).cell.auto.planVisible,hidden.cert.find(c=>c.runKey==="r902").planned],[false,true]);
+    // F-42：人の対象外は○を隠さない（excluded だけは見えたまま・保存値どおり）
+    check(condition==="excluded"?"F-42 A3/A6 excludedでも○を見せ保存値どおり":`A10 ${condition}で○を隠し保存値は保持`,[view(hidden).cell.auto.planVisible,hidden.cert.find(c=>c.runKey==="r902").planned],[condition==="excluded",true]);
     if(condition==="precedent")hidden.cert=setCertNumber(hidden.cert,"r901","g901","");
     if(condition==="lo")hidden.runs[1].lo=d.runs[1].lo;
     if(condition==="ck")hidden.cert=setCertNumber(hidden.cert,"r902","g901","");
@@ -125,7 +126,7 @@ async function verify(){
     cell(app.c).querySelector('button[aria-label="適用判断・理由メモを編集"]').click();await sleep(40);
     [...cell(app.c).querySelectorAll('input[type="radio"]')].find(e=>e.parentElement.textContent.includes("対象外")).click();await sleep(40);
     await setInput(cell(app.c).querySelector("textarea"),"ダミー：対象外の理由");await button(cell(app.c),"この判断で確定");
-    check("A10 対象外を確定すると○を隠す",!!checkbox(app.c),false);
+    check("F-42 A3 対象外を確定しても○はそのまま",checkbox(app.c)?.checked,true);
     check("A10 対象外でも予定の保存値を保持",(await snapshot(app.c)).cert.find(c=>c.runKey==="r902").planned,true);
     cell(app.c).querySelector('button[aria-label="適用判断・理由メモを編集"]').click();await sleep(40);
     [...cell(app.c).querySelectorAll('input[type="radio"]')].find(e=>e.parentElement.textContent.includes("未確認")).click();await sleep(40);await button(cell(app.c),"未確認に戻す");

@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>F-42 人の対象外と取得予定（○） 検証（ダミー）</title><style>body{margin:0;background:#0c1623;color:#cdd9e5;font-family:system-ui}</style></head><body>
+<!--
+  F-42（人の対象外判断で取得予定（○）が隠れる）の検証ページ。ダミーデータのみ。実API/DBに接続しない。
+  実行方法（npm run dev は使わない：APIサーバと既存DBを開いてしまうため）：
+    node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
+    → http://127.0.0.1:5173/verify/plan-exempt.html
+-->
+<div id="result" style="padding:18px"></div><div id="preview"></div><div id="sandbox" style="position:absolute;left:-99999px;width:1400px"></div><script type="module" src="/verify/plan-exempt.jsx"></script></body></html>

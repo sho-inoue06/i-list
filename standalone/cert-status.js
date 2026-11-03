@@ -1,10 +1,10 @@
 // F-23：単体HTML版だけの決定表入力。前例は導出するだけで保存しない。
-import { TODAY, dateDayNumber, findCert, evalCellInputs, decisionIndex, findDecision } from "../src/IListApp.jsx";
+import { TODAY, dateDayNumber, findCert, evalCellInputs } from "../src/IListApp.jsx";
 
 const numberOf = (cert, run, reg) => (findCert(cert, run.key, reg.rid)?.ck || "").trim();
 
+// F-42：人の適用判断（対象外・要再確認）は取得予定（○）に効かない。decisions は呼び出し側の互換のため受け取るだけ。
 export function makeCertStatusContext(runs, cert, decisions, sameCtx, today = TODAY) {
-  const decIdx = decisionIndex(decisions);
   return {
     evaluate(run, reg) {
       const ck = numberOf(cert, run, reg) || null;
@@ -18,7 +18,7 @@ export function makeCertStatusContext(runs, cert, decisions, sameCtx, today = TO
           dateDayNumber(base.baseRun.lo) <= lo && !!numberOf(cert, base.baseRun, reg))
       );
       // 決定表は空のLOだけを判定不能とする。不正な非空LOでも保存済みの予定は見せ、解除できる。
-      const planVisible = !ck && !precedent && !!run.lo && findDecision(decIdx, run.key, reg.rid)?.state !== "対象外";
+      const planVisible = !ck && !precedent && !!run.lo;
       const planned = planVisible && !!findCert(cert, run.key, reg.rid)?.planned;
       const canPlan = planVisible && lo !== null && lo > dateDayNumber(today);
       const certPlan = ck || precedent ? "実績あり" : planned ? "実績なし+予定あり" : "実績なし+予定なし";
