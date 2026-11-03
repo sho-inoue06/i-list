@@ -250,8 +250,9 @@ export const pruneCertByReg = (cert, rid) => {
 //                        ＝実績ありとして決定表へ渡るので一覧には出ない（F-26 B1）
 //   8 判定不能         … r9 の全法規（LOが空）＝一覧には出ない
 //   9 drop未定         … r10 の全法規（dropが空。F-24）＝要のセルは「期限前・未取得」で出る。黄色予告には出ない
-//   10 取得予定あり    … r7×REG-E（実績なし・予定あり＝車両申請「発生する（計画済み）」）
-//                        ＝「期限前・未取得」に「計画済み」の印つきで出る（F-26 A3）
+//   10 取得予定あり    … r7×REG-E・r7×REG-C（実績なし・予定あり＝車両申請「発生する（計画済み）」）
+//                        ＝「期限前・未取得」に「計画済み」の印つきで出る（F-26 A3）。
+//                        r7×REG-C は対象外・要再確認でもあり、対象外の印と並ぶ（F-42 A5）
 //   判定関数が返す状態が初期データに1件以上あることは verify/seed-demo.html の F-25 が確かめる。
 //
 // ■ 危険一覧（F-10・F-26）の3区分。期限超過と黄色予告は **r6 だけ** にしてある（F-25 A2）。
@@ -347,13 +348,14 @@ export function buildSeed(today = TODAY) {
     "DEMO-0006": {"DEMO-REG-A":"DEMO*A00/00*06","DEMO-REG-A2":"DEMO*A02/00*03","DEMO-REG-C":"DEMO*C00/00*02"},
   }, seed.runs, seed.regs);
   // 取得予定（F-23）の例。番号は無く、予定だけがある＝車両申請「発生する（計画済み）」。
-  seed.cert.push({ runKey:"r7", rid:"g6", ck:"", planned:true });
+  // F-42 A5：対象外・要再確認の r7×REG-C にも○を付ける（人の対象外は○を隠さない）。
+  seed.cert.push({ runKey:"r7", rid:"g6", ck:"", planned:true }, { runKey:"r7", rid:"g4", ck:"", planned:true });
   // 人の適用判断（F-28 A5）。危険一覧の3区分それぞれに「対象外」と「対象外・要再確認」を1件以上置く。
   // 確定時の条件はいまのデータから取る（＝条件は変わっていない）。要再確認は手動で立てた扱い（needsRecheck だけ true）。
   //   期限超過       … r11×REG-B 対象外（ランの末尾へ寄る）／r11×REG-D 対象外・要再確認（寄らない）。r6×REG-C は判断なし
   //   期限前・未取得 … r4×REG-C 対象外（r4 の先頭から末尾へ寄り、r4 が r5・r7 より後ろになる）／r7×REG-C 対象外・要再確認
   //   黄色予告       … r6×REG-E 対象外（r6 は寄った行しか無いので区分の末尾へ）／r11×REG-E 対象外・要再確認
-  // ○あり（r7×REG-E）には判断を付けない（対象外は取得予定を隠すので、計画済みの例が消える）。
+  // ○は r7×REG-E（判断なし）と r7×REG-C（対象外・要再確認）の2件。対象外でも○は隠れず、危険一覧に両方の印が出る（F-42）。
   const runOf = (k) => seed.runs.find((r) => r.key === k), regOf = (rid) => seed.regs.find((r) => r.rid === rid);
   const exempt = (runKey, rid, needsRecheck, reason) => ({ runKey, rid, state:"対象外", reason,
     decidedAt:`${d(-2)} 09:00`, needsRecheck, cond: condOf(runOf(runKey), regOf(rid), seed.regs) });
