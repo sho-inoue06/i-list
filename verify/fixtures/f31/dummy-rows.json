@@ -1,0 +1,62 @@
+[
+  {
+    "row": 2,
+    "number": "E43*156R01/00*9001*00",
+    "types": "DUMMY-A、DUMMY-B,DUMMY-C,DUMMY-MISSING,DUMMY-DUP"
+  },
+  {
+    "row": 3,
+    "number": "E43*13HR00/00*9001*00",
+    "types": "DUMMY-A"
+  },
+  {
+    "row": 4,
+    "number": "",
+    "types": "DUMMY-A"
+  },
+  {
+    "row": 5,
+    "number": "NOT-A-NUMBER",
+    "types": "DUMMY-A"
+  },
+  {
+    "row": 6,
+    "number": "E43*156R01/00*9001*00, E43*156R01/00*9002*00",
+    "types": "DUMMY-A"
+  },
+  {
+    "row": 7,
+    "number": "E43*156R01/00*9001*00",
+    "types": ""
+  },
+  {
+    "row": 8,
+    "number": "E43*999R00/00*9001*00",
+    "types": "DUMMY-A"
+  },
+  {
+    "row": 9,
+    "number": "E43*155R00/00*9001*00",
+    "types": "DUMMY-A"
+  },
+  {
+    "row": 10,
+    "number": "E43*157R00/00*9001*00",
+    "types": "DUMMY-A"
+  },
+  {
+    "row": 11,
+    "number": "E43*157R00/00*9002*00",
+    "types": "DUMMY-A"
+  },
+  {
+    "row": 12,
+    "number": "  Ｅ４３＊１５６Ｒ０１／００＊９００１＊００  ",
+    "types": "DUMMY-A"
+  },
+  {
+    "row": 13,
+    "number": "E43*158R00/00*9001*00",
+    "types": "DUMMY-C"
+  }
+]

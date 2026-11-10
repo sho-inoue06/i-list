@@ -22,6 +22,7 @@ import {
   SCHEMA_VERSION, pruneCertByRun, pruneCertByReg,
   INK, PALETTE, btn,
 } from "../src/IListApp.jsx";
+import ExcelImportDialog from "./ExcelImportDialog.jsx";
 import { makeCertStatusContext, setCertPlanned } from "./cert-status.js";
 
 const LINE = "#22303f", CYAN = "#4dd6e0", MUTE = "#5a6b7d", AMBER = "#e0b24d", GREEN = "#3fbf8f";
@@ -112,6 +113,8 @@ export default function StandaloneApp({ bootData } = {}) {
   const setDecisions = (v) => { markDirty(); _setDecisions(v); };
   const setBases = (v) => { markDirty(); _setBases(v); };
   const setSameness = (v) => { markDirty(); _setSameness(v); };
+
+  const [excelOpen, setExcelOpen] = useState(false);
 
   const dirty = state === "dirty";
 
@@ -282,6 +285,7 @@ export default function StandaloneApp({ bootData } = {}) {
         bases: nextBases, sameness: nextSameness } = parsed.data;
       const sweptDecisions = sweepRecheck(nextDecisions, nextRuns, nextRegs);
       const sweptSameness = sweepSameness(nextSameness, nextRuns, nextRegs, nextBases);
+      setExcelOpen(false);
       _setRuns(nextRuns); _setRegs(nextRegs); _setCert(nextCert);
       _setDecisions(sweptDecisions);
       _setBases(nextBases); _setSameness(sweptSameness);
@@ -317,8 +321,11 @@ export default function StandaloneApp({ bootData } = {}) {
           </button>
           <button onClick={exportJSON} style={btn(CYAN)}><Download size={13}/> JSONに書き出し</button>
           <button onClick={()=>fileRef.current?.click()} style={btn(MUTE,true)}><Upload size={13}/> JSONを読み込み</button>
+          <button onClick={() => setExcelOpen(true)} style={btn(CYAN, true)}>Excelを取り込み</button>
           <input ref={fileRef} type="file" accept="application/json,.json" onChange={importJSON} style={{ display:"none" }} />
         </div>
+
+        {excelOpen && <ExcelImportDialog {...{ runs, regs, cert }} onApply={setCert} onClose={() => setExcelOpen(false)} />}
 
         {/* ダミー専用の告知 */}
         <div style={{ background:`${AMBER}14`, border:`1px solid ${AMBER}55`, borderRadius:8, padding:"8px 12px", fontSize:11, color:AMBER, marginBottom:10, lineHeight:1.7 }}>
