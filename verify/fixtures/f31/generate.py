@@ -19,7 +19,7 @@ for i, (project, typ, lo) in enumerate([
     runs.append(dict(key=f'r{i}', gen=project, typeId=typ, sk='新', lo=lo, drop='2030-01-01'))
 regs = []
 for i, rule in enumerate(['R156-00', 'R156-01', 'R156-02', 'R13H-00', 'R155-01', 'R157-00', 'R158-00', 'DEMO-INVALID'], 301):
-    regs.append(dict(rid=f'g{i}', id=rule, label=f'完全ダミー法規 {rule}', shin='2020-01-01' if rule != 'R13H-00' else '2029-01-01', kei='2020-01-01', parent=''))
+    regs.append(dict(rid=f'g{i}', id=rule, label=f'完全ダミー法規 {rule}', shin='2020-01-01' if rule != 'R13H-00' else '2035-01-01', kei='2020-01-01' if rule != 'R13H-00' else '2035-01-01', parent=''))
 wide = ''.join(chr(ord(c)+0xfee0) if '!' <= c <= '~' else c for c in number('156','01'))
 data = dict(schemaVersion=2, runs=runs, regs=regs, cert=[
     dict(runKey='r303', rid='g301', ck='　'+wide+'　', planned=False),
