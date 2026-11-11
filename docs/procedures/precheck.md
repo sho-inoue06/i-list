@@ -1,4 +1,4 @@
-版：2026-11-03
+版：2026-11-11
 
 # 事前点検の手順
 
@@ -12,7 +12,7 @@
 
 ## 起動
 
-祥が指示したときだけ行う。`/prepare-f` の後、凍結commitの前に行う。
+準備セッションが [.claude/skills/prepare-f/SKILL.md](../../.claude/skills/prepare-f/SKILL.md) の手順で起動するか、祥が指示したときに行う。2ファイルの生成の後、凍結commitの前に行う。
 
 ## 入力
 
