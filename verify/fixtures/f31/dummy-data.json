@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 2,
+  "runs": [
+    {
+      "key": "r301",
+      "gen": "DUMMY-P31",
+      "typeId": "DUMMY-A",
+      "sk": "新",
+      "lo": "2025-01-01",
+      "drop": "2030-01-01"
+    },
+    {
+      "key": "r302",
+      "gen": "DUMMY-P31",
+      "typeId": "DUMMY-B",
+      "sk": "新",
+      "lo": "",
+      "drop": "2030-01-01"
+    },
+    {
+      "key": "r303",
+      "gen": "DUMMY-P31",
+      "typeId": "DUMMY-C",
+      "sk": "新",
+      "lo": "2025-01-01",
+      "drop": "2030-01-01"
+    },
+    {
+      "key": "r304",
+      "gen": "DUMMY-P31",
+      "typeId": "DUMMY-DUP",
+      "sk": "新",
+      "lo": "2025-01-01",
+      "drop": "2030-01-01"
+    },
+    {
+      "key": "r305",
+      "gen": "DUMMY-P31",
+      "typeId": "DUMMY-DUP",
+      "sk": "新",
+      "lo": "2026-01-01",
+      "drop": "2030-01-01"
+    },
+    {
+      "key": "r306",
+      "gen": "DUMMY-OTHER",
+      "typeId": "DUMMY-A",
+      "sk": "新",
+      "lo": "2025-01-01",
+      "drop": "2030-01-01"
+    },
+    {
+      "key": "r307",
+      "gen": "DUMMY-P31",
+      "typeId": "DUMMY-UNLISTED",
+      "sk": "新",
+      "lo": "2025-01-01",
+      "drop": "2030-01-01"
+    }
+  ],
+  "regs": [
+    {
+      "rid": "g301",
+      "id": "R156-00",
+      "label": "完全ダミー法規 R156-00",
+      "shin": "2020-01-01",
+      "kei": "2020-01-01",
+      "parent": ""
+    },
+    {
+      "rid": "g302",
+      "id": "R156-01",
+      "label": "完全ダミー法規 R156-01",
+      "shin": "2020-01-01",
+      "kei": "2020-01-01",
+      "parent": ""
+    },
+    {
+      "rid": "g303",
+      "id": "R156-02",
+      "label": "完全ダミー法規 R156-02",
+      "shin": "2020-01-01",
+      "kei": "2020-01-01",
+      "parent": ""
+    },
+    {
+      "rid": "g304",
+      "id": "R13H-00",
+      "label": "完全ダミー法規 R13H-00",
+      "shin": "2035-01-01",
+      "kei": "2035-01-01",
+      "parent": ""
+    },
+    {
+      "rid": "g305",
+      "id": "R155-01",
+      "label": "完全ダミー法規 R155-01",
+      "shin": "2020-01-01",
+      "kei": "2020-01-01",
+      "parent": ""
+    },
+    {
+      "rid": "g306",
+      "id": "R157-00",
+      "label": "完全ダミー法規 R157-00",
+      "shin": "2020-01-01",
+      "kei": "2020-01-01",
+      "parent": ""
+    },
+    {
+      "rid": "g307",
+      "id": "R158-00",
+      "label": "完全ダミー法規 R158-00",
+      "shin": "2020-01-01",
+      "kei": "2020-01-01",
+      "parent": ""
+    },
+    {
+      "rid": "g308",
+      "id": "DEMO-INVALID",
+      "label": "完全ダミー法規 DEMO-INVALID",
+      "shin": "2020-01-01",
+      "kei": "2020-01-01",
+      "parent": ""
+    }
+  ],
+  "cert": [
+    {
+      "runKey": "r303",
+      "rid": "g301",
+      "ck": "　Ｅ４３＊１５６Ｒ０１／００＊９００１＊００　",
+      "planned": false
+    },
+    {
+      "runKey": "r303",
+      "rid": "g302",
+      "ck": "DUMMY-EXISTING-KEEP",
+      "planned": false
+    },
+    {
+      "runKey": "r301",
+      "rid": "g301",
+      "ck": "",
+      "planned": true
+    }
+  ],
+  "decisions": [],
+  "bases": [],
+  "sameness": []
+}

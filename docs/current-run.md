@@ -3,10 +3,10 @@
 実装開始前に凍結する実行契約。進行状態のログではない。
 実装AI・レビューAIはこのファイルを変更しない。
 
-- Task: F-42（docs/current-task.md）
-- Implementer: Claude Code
-- Reviewer: Codex
-- Reviewer model: gpt-6-astra
+- Task: F-31（docs/current-task.md）
+- Implementer: Codex
+- Reviewer: Claude Code
+- Reviewer model: claude-opus-5-5
 - Reviewer effort: high
 - Procedure: docs/procedures/implement.md
 
