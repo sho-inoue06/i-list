@@ -46,6 +46,10 @@ const judge = (pass, fail, skip, note) =>
     : { pass, fail, skip, status: fail > 0 ? "fail" : "ok", note };
 const errorResult = (note) => ({ pass: 0, fail: 0, skip: 0, status: "error", note });
 
+// ハーネスの「総合結果」行だけを拾う（行頭が「総合結果:」または「…セルフ検証」の行。最初の1つ）。
+// 本文の後ろに出る例外文・実測値の中の "PASS n / FAIL m" は拾わない。
+const SUMMARY = /^(?:\s*総合結果:\s*|.*セルフ検証\s+)PASS (\d+) \/ FAIL (\d+)(?: \/ SKIP (\d+))?/m;
+
 const freePort = () => new Promise((res, rej) => {
   const s = createServer();
   s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => res(port)); });
@@ -115,7 +119,7 @@ async function runHtmls(list) {
       const name = f;
       try {
         const text = await readPage(dbgPort, `${base}/verify/${f}?autorun`);
-        const m = [...text.matchAll(/PASS (\d+) \/ FAIL (\d+)(?: \/ SKIP (\d+))?/g)].pop();
+        const m = text.match(SUMMARY);
         if (!m) { record(name, errorResult("結果の行が見つからない")); continue; }
         record(name, judge(+m[1], +m[2], +(m[3] || 0)));
       } catch (e) {
@@ -130,21 +134,28 @@ async function runHtmls(list) {
 }
 
 // ページを開き、「PASS n / FAIL m」が現れるまで待って本文を返す（時間切れは例外）。
-async function readPage(dbgPort, url) {
+function readPage(dbgPort, url) {
+  let timer;
+  const limit = new Promise((_, ng) => { timer = setTimeout(() => ng(new Error(`時間切れ（${HTML_TIMEOUT_MS / 1000}秒）`)), HTML_TIMEOUT_MS); });
+  return Promise.race([readPageInner(dbgPort, url), limit]).finally(() => clearTimeout(timer));
+}
+async function readPageInner(dbgPort, url) {
   const res = await fetch(`http://127.0.0.1:${dbgPort}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
   const tab = await res.json();
-  const ws = new WebSocket(tab.webSocketDebuggerUrl);
+  let ws;
+  try { ws = new WebSocket(tab.webSocketDebuggerUrl); } catch (e) { throw new Error(`CDPに接続できない: ${e.message}`); }
   await new Promise((ok, ng) => { ws.onopen = ok; ws.onerror = () => ng(new Error("CDPに接続できない")); });
   let id = 0;
   const pending = new Map();
   ws.onmessage = (ev) => { const m = JSON.parse(ev.data); pending.get(m.id)?.(m); pending.delete(m.id); };
   const send = (method, params = {}) => new Promise((ok) => { const i = ++id; pending.set(i, ok); ws.send(JSON.stringify({ id: i, method, params })); });
+  ws.onclose = () => { for (const ok of pending.values()) ok({}); pending.clear(); };
   try {
     const deadline = Date.now() + HTML_TIMEOUT_MS;
     while (Date.now() < deadline) {
       const r = await send("Runtime.evaluate", { expression: "document.body ? document.body.innerText : ''", returnByValue: true });
       const text = r.result?.result?.value ?? "";
-      if (/PASS \d+ \/ FAIL \d+/.test(text)) return text;
+      if (SUMMARY.test(text)) return text;
       await sleep(500);
     }
     throw new Error(`時間切れ（${HTML_TIMEOUT_MS / 1000}秒）`);
@@ -192,6 +203,7 @@ const sum = (k) => results.reduce((a, r) => a + r[k], 0);
 const bad = results.filter((r) => r.status !== "ok");
 const ok = bad.length === 0 && results.length > 0;
 console.log("-".repeat(60));
-console.log(`合計: 検証 ${results.length} 本 / PASS ${sum("pass")} / FAIL ${sum("fail")} / ERROR(起動不能・時間切れ) ${results.filter((r) => r.status === "error").length} 本`);
-console.log(ok ? "結果: すべて PASS" : `結果: 失敗あり … ${bad.map((r) => r.name).join(", ")}`);
+const skips = sum("skip");
+console.log(`合計: 検証 ${results.length} 本 / PASS ${sum("pass")} / FAIL ${sum("fail")} / SKIP(未検証) ${skips} / ERROR(起動不能・時間切れ) ${results.filter((r) => r.status === "error").length} 本`);
+console.log(ok ? `結果: すべて PASS${skips ? `（ただし SKIP ${skips} 件は未検証。ハーネス側が「すべて検証済みではない」と明示している既存の扱い）` : ""}` : `結果: 失敗あり … ${bad.map((r) => r.name).join(", ")}`);
 process.exit(ok ? 0 : 1);
