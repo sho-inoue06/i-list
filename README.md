@@ -71,6 +71,25 @@ node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
 
 ダミーデータのみを使い、実APIサーバ・実DB（`data/ilist.db`）には接続しません。テスト用の依存パッケージは追加していません。本番ビルド（`dist/`）にも含まれません。
 
+### まとめて回す：`npm run verify`
+
+`verify/` にある検証（ブラウザで開く `verify/*.html` と、Nodeで回す `verify/*.mjs`）を1コマンドで全部実行します。
+
+```bash
+npm run verify
+```
+
+- 対象は `verify/` の中身から自動で集めます（検証を足せば自動で対象に入ります）。生成用の `decision-table-gen.mjs` など、検証ではないものは対象から外し、外したものと理由を出力の先頭に出します。
+- 検証ごとに「名前／PASS件数／FAIL件数」を1行ずつ出し、最後に合計を出します。1件でもFAIL、起動できない、時間切れ（html 120秒・mjs 300秒）があれば終了コードは0以外で、全部PASSのときだけ0です。
+- Viteは `127.0.0.1` の空きポートで自動起動・自動終了します（`npm run dev` は使いません）。単体HTMLのビルド（`npm run build:standalone`）も先に自動で行います。実API・実DBには接続せず、Chromeは `127.0.0.1` 以外の名前解決を遮断して動かします。
+- Chromeの場所は環境変数 `CHROME_PATH` で変えられます。未指定ならmacOSの既定（`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`）です。
+
+```bash
+CHROME_PATH="/path/to/chrome" npm run verify
+```
+
+個別に1本ずつ開く手順は上のとおりです。
+
 ## 現時点の制限・未実装（既知）
 
 - **⑤-0は未着手**です。

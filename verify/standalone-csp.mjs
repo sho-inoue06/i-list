@@ -10,6 +10,7 @@
 //   ・読込失敗時に既存データを壊さない
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { CHROME_PATH } from "../scripts/chrome-path.mjs";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, readdirSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +21,7 @@ const OUT = process.argv[2];
 if (!OUT) throw new Error("usage: node verify/standalone-csp.mjs <existing evidence directory>");
 const PAGE_FILE = join(REPO, "dist-standalone/ilist-standalone.html");
 const PAGE = `file://${PAGE_FILE}`;
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME = CHROME_PATH;
 const PORT = 9335;
 
 // standalone/index.html に書いたCSPと一致していなければならない（取り違え・欠落の検出）。

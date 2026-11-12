@@ -2,6 +2,7 @@
 // ダミー専用。依存追加なし。実API/DBに接続しない（外部名前解決も止める）。先にnpm run build:standaloneを実行。
 // usage: node verify/plan-exempt-file.mjs <既存の証拠ディレクトリ>
 import { spawn } from "node:child_process";
+import { CHROME_PATH } from "../scripts/chrome-path.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync } from "node:fs";
@@ -10,7 +11,7 @@ import { join, resolve } from "node:path";
 const out=process.argv[2];if(!out)throw Error("証拠ディレクトリを指定してください");
 const page="file://"+fileURLToPath(new URL("../dist-standalone/ilist-standalone.html",import.meta.url));
 const profile=mkdtempSync(join(tmpdir(),"ilist-f42-file-")),downloads=mkdtempSync(join(out,"f42-downloads-"));
-const chrome=spawn("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",["--headless=new","--disable-gpu","--no-first-run","--no-default-browser-check","--host-resolver-rules=MAP * ~NOTFOUND","--window-size=1600,1100","--remote-debugging-address=127.0.0.1","--remote-debugging-port=9342",`--user-data-dir=${profile}`,"about:blank"],{stdio:"ignore"});
+const chrome=spawn(CHROME_PATH,["--headless=new","--disable-gpu","--no-first-run","--no-default-browser-check","--host-resolver-rules=MAP * ~NOTFOUND","--window-size=1600,1100","--remote-debugging-address=127.0.0.1","--remote-debugging-port=9342",`--user-data-dir=${profile}`,"about:blank"],{stdio:"ignore"});
 let ws;const cleanup=()=>{ws?.close();chrome.kill();try{rmSync(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});}catch{}};process.on("exit",cleanup);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let target;for(let i=0;i<100;i++){try{target=(await(await fetch("http://127.0.0.1:9342/json/list")).json()).find(t=>t.type==="page");if(target)break;}catch{}await sleep(100);}

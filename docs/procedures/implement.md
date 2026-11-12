@@ -1,4 +1,4 @@
-版：2026-10-31
+版：2026-11-12
 
 # 実装セッションの手順
 
@@ -10,6 +10,7 @@
 
 - `docs/current-run.md` で実装するFの既定。
 - レビューは [docs/procedures/review.md](review.md) に従い、`docs/current-run.md` のReviewer・Reviewer model・Reviewer effort で起動する。
+- セルフ検証と再検証では `npm run verify` を回し、最終報告の「3. 実行した検証と結果」に合計の行（検証本数・PASS・FAIL）を載せる。
 - 停止はレビューと修正の後の1回。push・PR作成・マージは、停止後の祥の出荷承認を得てから ship.md の手順でだけ行う。
 
 ## exploration
