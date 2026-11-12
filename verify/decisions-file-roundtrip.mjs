@@ -3,6 +3,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { CHROME_PATH } from "../scripts/chrome-path.mjs";
 import { mkdtempSync, rmSync, readdirSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +12,7 @@ const REPO = fileURLToPath(new URL("../", import.meta.url));
 const OUT = process.argv[2];
 if (!OUT) throw new Error("usage: node verify/decisions-file-roundtrip.mjs <existing evidence directory>");
 const PAGE = `file://${REPO}/dist-standalone/ilist-standalone.html`;
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME = CHROME_PATH;
 const PORT = 9333;
 const profile = mkdtempSync(join(tmpdir(), "ilist-file-"));
 const dl = mkdtempSync(join(OUT, "downloads-"));
