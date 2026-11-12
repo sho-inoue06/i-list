@@ -181,7 +181,9 @@ for (const f of targets.filter((x) => x.endsWith(".mjs"))) {
     // 件数を出さない検証（assert方式）。最後まで通れば1件PASSとして数える。
     record(f, judge(1, 0, 0, "件数表示なし：全体で1件として計上"));
   } else {
-    record(f, { ...errorResult(`終了コード ${r.code}: ${tail}`) });
+    // 件数を出さずに非0で終わった＝検証が失敗した（assert等）。エラー行を理由に出す。
+    const why = r.out.split("\n").find((l) => /Error|NG|失敗/.test(l))?.trim().slice(0, 160) || tail;
+    record(f, { pass: 0, fail: 1, skip: 0, status: "fail", note: `終了コード ${r.code}: ${why}` });
   }
 }
 
