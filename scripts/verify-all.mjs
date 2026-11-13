@@ -4,6 +4,8 @@
 // 対象は verify/ の中身から自動で集める（ファイル名の一覧は持たない）。
 // 検証ではない生成用ファイルだけ EXCLUDED に理由つきで書く。
 // 1件でもFAIL・起動失敗・時間切れがあれば、終了コードは0以外。
+// SKIP（確かめる手段がなく確かめていない項目）は、verify/known-skips.json にある「検証ファイル名＋項目ID」のものだけ許す。
+// 一覧にないSKIP（項目IDが読めないものを含む）が1件でもあれば、終了コードは0以外。
 // Chromeの場所は環境変数 CHROME_PATH（未指定ならmacOSの既定）。
 import { spawn, spawnSync } from "node:child_process";
 import { readdirSync, mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
@@ -27,10 +29,37 @@ const EXCLUDED = {
 const files = readdirSync(VERIFY).filter((f) => /\.(html|mjs)$/.test(f)).sort();
 const excluded = files.filter((f) => EXCLUDED[f]);
 const targets = files.filter((f) => !EXCLUDED[f]);
-const results = []; // { name, pass, fail, skip, status: "ok"|"fail"|"error", note }
+const results = []; // { name, pass, fail, skip, skipIds?, status: "ok"|"fail"|"error", note }
+
+// ── 許すSKIPの一覧（読めなければ検証を回さずに終了コード1）──
+const KNOWN_SKIPS_PATH = join(VERIFY, "known-skips.json");
+function loadKnownSkips() {
+  let raw;
+  try { raw = readFileSync(KNOWN_SKIPS_PATH, "utf8"); } catch (e) { return { error: `読めない（${e.code || e.message}）` }; }
+  let data;
+  try { data = JSON.parse(raw); } catch (e) { return { error: `JSONとして解釈できない（${e.message}）` }; }
+  if (!Array.isArray(data)) return { error: "形式が違う（配列ではない）" };
+  const seen = new Set();
+  for (const [i, e] of data.entries()) {
+    const ok = e && typeof e === "object" && !Array.isArray(e)
+      && ["file", "id", "reason"].every((k) => typeof e[k] === "string" && e[k].trim() !== "");
+    if (!ok) return { error: `形式が違う（${i + 1} 件目に 文字列の file・id・reason が揃っていない）` };
+    const key = `${e.file}/${e.id}`;
+    if (seen.has(key)) return { error: `形式が違う（${key} が重複している）` };
+    seen.add(key);
+  }
+  return { list: data };
+}
+const known = loadKnownSkips();
+if (known.error) {
+  console.log(`ERROR: verify/known-skips.json ${known.error}。検証は回さない`);
+  process.exit(1);
+}
+const knownKeys = new Set(known.list.map((e) => `${e.file}/${e.id}`));
 
 console.log(`verify/ の検証: ${targets.length} 件（html ${targets.filter((f) => f.endsWith(".html")).length} / mjs ${targets.filter((f) => f.endsWith(".mjs")).length}）`);
 for (const f of excluded) console.log(`対象外: verify/${f} … ${EXCLUDED[f]}`);
+console.log(`許しているSKIP（verify/known-skips.json）: ${known.list.length} 件${known.list.map((e) => `\n  ${e.file}/${e.id} … ${e.reason}`).join("")}`);
 if (targets.length === 0) { console.log("ERROR: 検証が1件も見つからない"); process.exit(1); }
 
 const record = (name, r) => {
@@ -118,10 +147,10 @@ async function runHtmls(list) {
     for (const f of list) {
       const name = f;
       try {
-        const text = await readPage(dbgPort, `${base}/verify/${f}?autorun`);
+        const { text, skipIds } = await readPage(dbgPort, `${base}/verify/${f}?autorun`);
         const m = text.match(SUMMARY);
         if (!m) { record(name, errorResult("結果の行が見つからない")); continue; }
-        record(name, judge(+m[1], +m[2], +(m[3] || 0)));
+        record(name, { ...judge(+m[1], +m[2], +(m[3] || 0)), skipIds });
       } catch (e) {
         record(name, errorResult(e.message));
       }
@@ -133,7 +162,19 @@ async function runHtmls(list) {
   }
 }
 
-// ページを開き、「PASS n / FAIL m」が現れるまで待って本文を返す（時間切れは例外）。
+// ハーネスが window.__VERIFY_RESULT__.scenarios に出している「SKIPの項目ID」を読む（読めなければ空＝ID不明扱い）。
+async function readSkipIds(send) {
+  try {
+    const r = await send("Runtime.evaluate", {
+      expression: "JSON.stringify(((window.__VERIFY_RESULT__ || {}).scenarios || []).filter((s) => s && s.skip).map((s) => s.id))",
+      returnByValue: true,
+    });
+    const ids = JSON.parse(r.result?.result?.value ?? "[]");
+    return Array.isArray(ids) ? ids.filter((x) => typeof x === "string" && x !== "") : [];
+  } catch { return []; }
+}
+
+// ページを開き、「PASS n / FAIL m」が現れるまで待って本文とSKIP項目IDを返す（時間切れは例外）。
 function readPage(dbgPort, url) {
   let timer;
   const limit = new Promise((_, ng) => { timer = setTimeout(() => ng(new Error(`時間切れ（${HTML_TIMEOUT_MS / 1000}秒）`)), HTML_TIMEOUT_MS); });
@@ -155,7 +196,7 @@ async function readPageInner(dbgPort, url) {
     while (Date.now() < deadline) {
       const r = await send("Runtime.evaluate", { expression: "document.body ? document.body.innerText : ''", returnByValue: true });
       const text = r.result?.result?.value ?? "";
-      if (SUMMARY.test(text)) return text;
+      if (SUMMARY.test(text)) return { text, skipIds: await readSkipIds(send) };
       await sleep(500);
     }
     throw new Error(`時間切れ（${HTML_TIMEOUT_MS / 1000}秒）`);
@@ -200,10 +241,27 @@ for (const f of targets.filter((x) => x.endsWith(".mjs"))) {
 
 // ── 合計 ──
 const sum = (k) => results.reduce((a, r) => a + r[k], 0);
-const bad = results.filter((r) => r.status !== "ok");
-const ok = bad.length === 0 && results.length > 0;
-console.log("-".repeat(60));
 const skips = sum("skip");
+// SKIPを「許す／一覧にない／ID不明」に仕分ける（検証ファイル名と項目IDの両方が一致したものだけ許す）。
+const unlisted = []; // 一覧にないSKIP（"<検証名>/<項目ID>" か "<検証名>/ID不明"）
+const seenKeys = new Set();
+for (const r of results) {
+  if (!r.skip) continue;
+  const ids = r.skipIds ?? [];
+  for (const id of ids) {
+    const key = `${r.name}/${id}`;
+    if (knownKeys.has(key) && !seenKeys.has(key)) seenKeys.add(key);
+    else unlisted.push(key);
+  }
+  for (let i = ids.length; i < r.skip; i++) unlisted.push(`${r.name}/ID不明`);
+}
+const missing = [...knownKeys].filter((k) => !seenKeys.has(k));
+const bad = results.filter((r) => r.status !== "ok");
+const ok = bad.length === 0 && results.length > 0 && unlisted.length === 0;
+console.log("-".repeat(60));
 console.log(`合計: 検証 ${results.length} 本 / PASS ${sum("pass")} / FAIL ${sum("fail")} / SKIP(未検証) ${skips} / ERROR(起動不能・時間切れ) ${results.filter((r) => r.status === "error").length} 本`);
-console.log(ok ? `結果: すべて PASS${skips ? `（ただし SKIP ${skips} 件は未検証。ハーネス側が「すべて検証済みではない」と明示している既存の扱い）` : ""}` : `結果: 失敗あり … ${bad.map((r) => r.name).join(", ")}`);
+for (const k of seenKeys) console.log(`許可済みSKIP … ${k}`);
+for (const k of unlisted) console.log(`一覧にないSKIP … ${k}`);
+for (const k of missing) console.log(`一覧にあるが出なかったSKIP … ${k}`);
+console.log(ok ? `結果: すべて PASS${skips ? `（ただし SKIP ${skips} 件は未検証。ハーネス側が「すべて検証済みではない」と明示している既存の扱い）` : ""}` : `結果: 失敗あり … ${[...bad.map((r) => r.name), ...unlisted.map((k) => `一覧にないSKIP ${k}`)].join(", ")}`);
 process.exit(ok ? 0 : 1);

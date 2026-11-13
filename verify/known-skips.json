@@ -1,0 +1,7 @@
+[
+  {
+    "file": "save-guard.html",
+    "id": "M-unmount-inflight-put",
+    "reason": "アンマウント後の setSave 呼出を数える有効な観測手段がなく、未検証（verify/save-guard.jsx のSKIP理由を参照）"
+  }
+]
