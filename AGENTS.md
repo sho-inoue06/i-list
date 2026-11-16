@@ -116,7 +116,8 @@
 - 1セッションにつき1成果単位とする。1成果単位＝1branch。branchを切るのは準備セッションだけ（Fでない作業の例外は下記）。前の作業branchの上に、別の成果を積まない。
 - branch名は次を基本とする：機能 `feat/f-xx`、進め方・基盤 `chore/内容`、記録整理 `docs/内容`。
 - Fの実装セッションは、`docs/current-run.md` のTaskに対応するbranchでない、または仕様凍結commitが無い場合は着手せず停止する。この確認はFの実装セッションにだけ適用する。
-- Fでない作業（chore・docs）は `/prepare-f` を使わない。この場合に限り、作業セッションが開始時に branch を1本作ってよい。手順と止まる条件は準備セッションと同じ（未コミット差分なし → `git fetch origin` → `git switch -c <branch> origin/main`。未コミット差分がある、または同名branchがあれば停止）。
+- Fでない作業（chore・docs）は `/prepare-f` を使わない。この場合に限り、作業セッションが開始時に branch を1本作ってよい。手順と止まる条件は準備セッションと同じ（未コミット差分なし → `git fetch origin` → `git switch -c <branch> origin/main`。未コミット差分がある、または同名branchがあれば停止）。ただし同名branchがあっても、「そのbranchにいる」「origin/mainより先のcommitが0件」「未コミット差分が無い」の3つを満たすなら、新しく作らずにそのまま使う。
+- chore・docs の作業セッションは、branchを作った後（または上のただし書きでそのまま使うと決めた後）、ファイルを変える前に、依頼文の事前点検（Codex・読み取り専用）を1回起動する。依頼文に点検の指示が無くても行う。起動と入力は [docs/procedures/precheck.md](docs/procedures/precheck.md) に従う。判定がNG、起動に失敗、または判定が読めないときは、ファイルを変えずに停止し、点検の出力を要約・書き換えなしでそのまま報告する。依頼文を直さない。再点検しない。
 - chore・docs では `docs/current-task.md`・`docs/current-run.md` を読まず、依頼文を仕様とする。冒頭の「実装前に必ず docs/current-task.md を読む」「docs/current-task.md が存在しない場合は停止」と、「ファイルの責務と不変ルール」の両ファイルを読む規定は、Fの作業にだけ適用する。このファイルと手順ファイルで `docs/current-run.md` の指定・許可とされている事項（レビュー担当・モデル・推論強度・レビュー起動・push）は、chore・docs では依頼文の指定と読み替える。Git運用ルールの明示承認は読み替えない。
 - chore・docs の作業セッションは、依頼文で指定された branch 名で作業していることだけを確認する。
 - mainへのマージ方式はsquashを基本とし、1成果単位をmain上の1commitにする。
