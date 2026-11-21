@@ -71,7 +71,7 @@
 - 実装、レビュー、テストは禁止する。
 - `git fetch origin` は、branch作成とやり直し判定のためにだけ実行してよい。
 - Web検索・Web取得、Notion以外のMCP、Claude Codeの起動は行わない。
-- Codexの起動は、事前点検のための `codex exec`（`docs/codex-review.md` の起動コマンド。`-s read-only`・`--ephemeral`・モデルと推論強度の明示）だけ可。read-only以外での起動、Codex以外のAIの起動は禁止する。
+- Codexの起動は、事前点検のための `codex exec`（`docs/codex-review.md` の起動コマンド。`-s read-only`・`--ephemeral`・モデルと推論強度の明示に加え、`-c 'web_search="disabled"'` と `--disable apps` の指定を付ける）だけ可。read-only以外での起動、Codex以外のAIの起動は禁止する。
   - 自動の点検は1つのFで最大2回。2回目もNGなら直さずに停止する。祥が手でDefineを直して `/prepare-f` を再実行したときは、回数を数え直す。
   - 依頼文は SKILL.md の固定の1文だけ。前回の点検結果・直した内容・Notionの内容を渡さない。依頼文の一時ファイルはrepoの外に置く。
 - Notion URLを `docs/current-task.md` へ書かない。
