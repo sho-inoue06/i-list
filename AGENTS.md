@@ -19,7 +19,7 @@
   - 明示承認後、その範囲だけをファイル指定でstage→差分再確認→commit→通常pushできる。無関係な変更・既存stage済み変更を勝手に取り込まない。
   - stageは常にファイル指定で行う（`git add .`／`git add -A` は使わない）。ignoreの強制解除はしない。秘密情報・会社実データ・DBはstageしない。
   - 作業ブランチ（`feat/f-xx` のような機能単位の名前）へのcommitは、実装・セルフ検証・レビュー後の修正など区切りごとに行う限り、都度承認なしでよい（1回にまとめない）。承認不要はcommitのみで、pushは常に明示承認を要する。commitとpushの承認は1回にまとめてよいが、commitだけの承認にpushを含めない。
-  - mainへの直接commit・pushはしない（承認があっても行わない）。PR作成・squashマージ・マージ済み作業branchの削除は、祥の出荷承認の後に限り、[docs/procedures/ship.md](docs/procedures/ship.md) の手順でだけ行ってよい。AIが行うマージはsquashのみで、squash以外のマージ方式、tag付けは祥が行う。
+  - mainへの直接commit・pushはしない（承認があっても行わない）。PR作成・失敗した CI ジョブの1回の再実行・squashマージ・マージ済み作業branchの削除は、祥の出荷承認の後に限り、[docs/procedures/ship.md](docs/procedures/ship.md) の手順でだけ行ってよい。AIが行うマージはsquashのみで、squash以外のマージ方式、tag付けは祥が行う。
   - 出荷承認は、最終停止の報告に対して祥が「出荷」と明示したものに限る。push承認は出荷承認を含まない。出荷承認は、ship.md の push（手順1）の承認を兼ねる。
   - 変更を戻すときは `git revert` を使う。強制push、履歴書換え、reset・変更破棄、remote／Git設定変更、pull／競合解消は別承認。ただし ship.md の main同期（`git switch main` → `git pull --ff-only origin main`）だけは出荷承認に含む。競合解消は含まない。
 - 旧repo（i-list-reference）は参照専用。コピー元としてのみ扱い、書き込まない。
@@ -53,7 +53,7 @@
 |---|---|---|---|
 | 準備（`/prepare-f`） | 指定Fページ1件の読み取りと、そのページの完成条件・出てはいけないもの・やらないこと・必須検証の文言の修正、「決めたこと」への追記、定義済み日の上書きだけ | `docs/current-task.md`・`docs/current-run.md` のみ | 開始時のbranch作成1回と、祥の明示承認後の凍結commit1回（2ファイルだけ）。pushは承認があっても禁止 |
 | 事前点検（準備セッションが起動、または祥の指示） | 禁止 | 無し | 変更禁止 |
-| 実装（`docs/current-run.md`） | 禁止 | コード（`docs/current-task.md`・`docs/current-run.md` は不可） | branchの作成・切り替え禁止。commitは上のGit運用ルールどおり、pushは明示承認。出荷承認後は ship.md の範囲で PR作成・squashマージ・branch削除可 |
+| 実装（`docs/current-run.md`） | 禁止 | コード（`docs/current-task.md`・`docs/current-run.md` は不可） | branchの作成・切り替え禁止。commitは上のGit運用ルールどおり、pushは明示承認。出荷承認後は ship.md の範囲で PR作成・失敗した CI ジョブの1回の再実行・squashマージ・branch削除可 |
 | レビュー | 禁止 | 無し | 変更禁止 |
 
 - 実装AIとレビューAIを同一セッションにしない。
