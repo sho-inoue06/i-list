@@ -1,0 +1,32 @@
+# push ごとに npm run verify を回す。判定は verify の終了コードだけ（0なら成功、それ以外は失敗）。
+# 出荷（docs/procedures/ship.md 手順3）は、このチェックが成功したときだけマージに進む。
+name: verify
+
+on:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # 手元（macOS）と違うところだけを既存の差し替え口で合わせる。verify の中身は変えない。
+      CHROME_PATH: /usr/bin/google-chrome
+      TZ: Asia/Tokyo
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          # GITHUB_TOKEN は actions/checkout の取得にだけ使う（setup-node には渡さない）。
+          token: ""
+      - run: npm ci
+      # repo に入っていない（.gitignore の *.xlsx で外れている）検証用ファイルを、repo にある生成コードで作る。
+      - run: python3 verify/fixtures/f31/generate.py
+      - run: npm run verify
