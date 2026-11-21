@@ -7,7 +7,7 @@ argument-hint: "[FページURL] [implementer] [reviewer]"
 
 # prepare-f
 
-版：2026-11-11
+版：2026-11-21
 
 禁止と境界は AGENTS.md（「セッションごとの境界」の準備の行と「### 準備」）に従う。このファイルは手順だけを持ち、AGENTS.md の境界を緩めない。矛盾したら AGENTS.md を優先して停止する。
 
@@ -190,7 +190,7 @@ Notionの内容をそのまま外部AIへ渡さず、実行に必要な情報だ
 
 ### 起動
 
-- docs/codex-review.md の「起動コマンド」をそのまま使い、`codex exec` を起動する。`-s read-only`・`--ephemeral` を付け、モデル（`-m`）と推論強度（`-c model_reasoning_effort`）は docs/codex-review.md の値を毎回明示する。値を変えない
+- docs/codex-review.md の「起動コマンド」をそのまま使い、`codex exec` を起動する。`-s read-only`・`--ephemeral`・`-c 'web_search="disabled"'`・`--disable apps` を付け、モデル（`-m`）と推論強度（`-c model_reasoning_effort`）は docs/codex-review.md の値を毎回明示する。値を変えない
 - Codex 以外のAI（Claude Code など）を起動しない。read-only 以外では起動しない
 - 依頼文は次の固定の1文だけにする。1字も足さない
 
@@ -205,7 +205,8 @@ AGENTS.md と docs/procedures/precheck.md に従って、docs/current-task.md �
 PROMPT_FILE="$(mktemp)"
 printf '%s\n' 'AGENTS.md と docs/procedures/precheck.md に従って、docs/current-task.md を事前点検して。' > "$PROMPT_FILE"
 codex exec --ephemeral -s read-only -C "$(git rev-parse --show-toplevel)" \
-  -m <docs/codex-review.md のモデル> -c 'model_reasoning_effort="<docs/codex-review.md の推論強度>"' - < "$PROMPT_FILE"
+  -m <docs/codex-review.md のモデル> -c 'model_reasoning_effort="<docs/codex-review.md の推論強度>"' \
+  -c 'web_search="disabled"' --disable apps - < "$PROMPT_FILE"
 rm -f "$PROMPT_FILE"
 ```
 
