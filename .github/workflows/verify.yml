@@ -1,5 +1,5 @@
 # push のたびに npm run verify を回す。成否は準備（checkout・Node・npm ci）と npm run verify の終了コードだけで決まる。
-# 使うのは GitHub が自動で発行する GITHUB_TOKEN（contents: read）だけで、checkout 以外に使わない。
+# 使うのは GitHub が自動で発行する GITHUB_TOKEN（contents: read）だけで、checkout 以外に使わない（setup-node には渡さない）。
 name: verify
 
 on:
@@ -20,6 +20,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          # 既定では Node の取得に GITHUB_TOKEN を使うので、空にして使わせない（B1：トークンは checkout だけ）。
+          token: ""
       - run: npm ci
       # 手元（macOS・日本時間）との違いは、verify の既存の差し替え口と環境変数だけで合わせる。
       #   CHROME_PATH：scripts/chrome-path.mjs が読む。ubuntu のランナーに入っている Google Chrome の場所。
