@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import StandaloneApp from "./StandaloneApp.jsx";
-import { readBootData } from "../src/IListApp.jsx";
+import { readBootData } from "../src/judge/saved-html.js";
 
 // 起動データの埋め込み（#ilist-boot-data）を読む。
 //   present=false … 埋め込みなし（通常テンプレート起動）→ StandaloneApp が SEED を使う
