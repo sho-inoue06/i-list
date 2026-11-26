@@ -77,7 +77,7 @@ if (external.length) {
 const TEMPLATE_START = "<!--ILIST_TEMPLATE_START-->";
 const TEMPLATE_END = "<!--ILIST_TEMPLATE_END-->";
 {
-  // JSバンドル自身が TEMPLATE_START/END と同じ文字列を定数として持つ（src/IListApp.jsx の
+  // JSバンドル自身が TEMPLATE_START/END と同じ文字列を定数として持つ（src/judge/saved-html.js の
   // embedTemplateSlot が使うため）。マーカーの位置を数えるときはscript本文を覆い隠し、
   // 実際のHTML構造（script本文の外）だけを見る。置換はマスク前のhtmlに対して行う。
   const maskScriptBodies = (s) =>
@@ -90,7 +90,7 @@ const TEMPLATE_END = "<!--ILIST_TEMPLATE_END-->";
     process.exit(1);
   }
   // 雛形はBase64で埋め込む（HTML特殊文字を含まない文字列になるため、手作りのエスケープが不要になる。
-  // src/IListApp.jsx の embedTemplateSlot も同じ方式でBase64化する）。
+  // src/judge/saved-html.js の embedTemplateSlot も同じ方式でBase64化する）。
   const b64 = Buffer.from(html, "utf8").toString("base64");
   const startIdx = masked.indexOf(TEMPLATE_START);
   const endIdx = masked.indexOf(TEMPLATE_END);

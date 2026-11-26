@@ -3,7 +3,7 @@
 //
 //   ・API（/api/data）へは一切アクセスしない。サーバ保存は行わない。
 //   ・データは手入力し、JSONファイルへ明示的に書き出して保存する。
-//   ・画面・4タブ・判定ロジックは src/IListApp.jsx と共有する（二重管理をしない）。
+//   ・画面・4タブは src/IListApp.jsx と、判定ロジックは src/judge/ と共有する（二重管理をしない）。
 //
 // 保存表示の考え方：
 //   API版の「サーバに保存済み」は出さない。書き出すまでは「未書き出し」と表示する。
@@ -12,18 +12,24 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Download, Upload, Table2, Scale, Pencil, FileCheck, AlertTriangle, ShieldCheck, Save } from "lucide-react";
 import {
-  SEED, nextKey, parseImportedData, applyImported, summarize,
-  buildSavedHtml,
+  SEED,
   MatrixView, RunsEditor, RegsEditor, CertEditor,
-  sweepRecheck, upsertDecision, normalizeDecisions, markRunNeedsRecheck,
-  pruneDecisionsByRun, pruneDecisionsByReg,
-  setBase, sweepSameness, upsertSameness, normalizeSameness, makeSamenessContext, makeBasisContext,
-  pruneBasesByRun, pruneSamenessByRun, pruneSamenessByReg,
-  SCHEMA_VERSION, pruneCertByRun, pruneCertByReg,
   INK, PALETTE, btn,
 } from "../src/IListApp.jsx";
+import { nextKey, parseImportedData, applyImported, SCHEMA_VERSION } from "../src/judge/data.js";
+import { summarize } from "../src/judge/decide.js";
+import { buildSavedHtml } from "../src/judge/saved-html.js";
+import {
+  sweepRecheck, upsertDecision, normalizeDecisions, markRunNeedsRecheck,
+  pruneDecisionsByRun, pruneDecisionsByReg,
+} from "../src/judge/decisions.js";
+import {
+  setBase, sweepSameness, upsertSameness, normalizeSameness, makeSamenessContext, makeBasisContext,
+  pruneBasesByRun, pruneSamenessByRun, pruneSamenessByReg,
+} from "../src/judge/sameness.js";
+import { pruneCertByRun, pruneCertByReg } from "../src/judge/cert.js";
 import ExcelImportDialog from "./ExcelImportDialog.jsx";
-import { makeCertStatusContext, setCertPlanned } from "./cert-status.js";
+import { makeCertStatusContext, setCertPlanned } from "../src/judge/cert-status.js";
 
 const LINE = "#22303f", CYAN = "#4dd6e0", MUTE = "#5a6b7d", AMBER = "#e0b24d", GREEN = "#3fbf8f";
 
@@ -185,7 +191,7 @@ export default function StandaloneApp({ bootData } = {}) {
 
   const typeIds = useMemo(() => [...new Set(runs.map(r => r.typeId))], [runs]);
   const colorOf = (typeId) => PALETTE[typeIds.indexOf(typeId) % PALETTE.length];
-  // 判定ロジックは共有（src/IListApp.jsx の純関数を使う）
+  // 判定ロジックは共有（src/judge/ の純関数を使う）
   // 同一性（F-04）で継続車日／新型車日を切り替える。比較元が未選択・無効のランは従来どおり。
   const sameCtx = useMemo(() => makeSamenessContext(runs, bases, sameness), [runs, bases, sameness]);
   const certCtx = useMemo(() => makeCertStatusContext(runs, cert, decisions, sameCtx), [runs, cert, decisions, sameCtx]);
